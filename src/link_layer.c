@@ -27,60 +27,60 @@ int llopen(LinkLayer connectionParameters){
     if(connectionParameters.role == LlRx){
         // Wait for a SET then ...
         // Send UA
+        if(!llopenRx){
+            perror("Error llopenRx");
+            return -1;
+        }
+
     } else {
         // Send SET (write)
         // Wait UA (read)
+        if(!llopenTx){
+           perror("Error llopenTx");
+           return -1; 
+        }
     }
 
     
     return 1;
 }
 
-int llopenRx(){
 
+//temos que depois dar set a um alarm e lidar com isso
+int llopenRx(){ 
+    control = NOTHING_C;
+
+    while(control != SET){
+        if(!read_aux()){
+            perror("Error reading SET");
+            return -1;
+        }
+    }
+
+    control = NOTHING_C;
+
+    write_aux(ua_menssage, 5);
+
+    return 1;
 }
 
+//temos que depois dar set a um alarm e lidar com isso
 int llopenTx(){
-    sendSET(); // Send SET
-    unsigned char packet[5] = {0};
-    llread(*packet);    // Read UA
-    checkUA(packet);    // Check UA
-}
-
-int sendSET(){
-    unsigned char set[5] = {0};
+    write_aux(set_menssage, 5); // Send SET
     
-    set[0] = FLAG;
-    set[1] = A;
-    set[2] = C_SET;
-    set[3] = set[1] ^ set[2];
-    set[4] = FLAG;
+    control = NOTHING_C;
 
-    if(writeBytesSerialPort(set, 5) == -1){
-        perror("Error sending SET");
-        return -1;
+    while(control != UA){
+        if(!read_aux()){
+            perror("Error reading UA");
+            return -1;
+        }
     }
+
+    control = NOTHING_C;
 
     return 1;
 }
-
-int sendUA(){
-    unsigned char ua[5] = {0};
-
-    ua[0] = FLAG;
-    ua[1] = A;
-    ua[2] = C_UA;
-    ua[3] = ua[1] ^ ua[2];
-    ua[4] = FLAG;
-
-    if(writeBytesSerialPort(ua, 5) == -1){
-        perror("Error sending UA");
-        return -1;
-    }
-
-    return 1;
-}
-
 
 
 ////////////////////////////////////////////////
@@ -112,7 +112,7 @@ int llclose(int showStatistics)
     return clstat;
 }
 
-int stateMachineHandler(unsigned char byte){
+void stateMachineHandler(unsigned char byte){
     switch (state){
     case START:
         if(byte == FLAG){
@@ -159,12 +159,8 @@ int stateMachineHandler(unsigned char byte){
             state = START;
         }
         break;
-
-    default:
-        return 0;
-        break;
+    
     }
-    return 1;
 }
 
 int c_check(unsigned char byte){
@@ -201,5 +197,29 @@ int c_check(unsigned char byte){
             return 0;
             break;
         }
+    return 1;
+}
+
+int read_aux(){
+    state = START;
+    unsigned char byte;
+
+    while(state != STOP){
+        if(readByteSerialPort(byte)){
+            stateMachineHandler(byte);
+        }
+    }
+
+    state = END;
+
+    return 1;
+}
+
+int write_aux(unsigned char mensage, int numBytes){
+    if(writeBytesSerialPort(mensage, numBytes) == -1){
+        perror("Error sending SET");
+        return -1;
+    }
+
     return 1;
 }

@@ -39,6 +39,7 @@ typedef enum{
     NOTHING_C
 } C_TYPE;
 
+
 //globla variables
 #define FLAG 0x7E
 #define A 0x03
@@ -50,6 +51,9 @@ typedef enum{
 #define C_REJ0 0x54
 #define C_REJ1 0x55
 #define C_DISC 0x0B
+
+unsigned char set_menssage[5] = {FLAG,A,C_SET,A^C_SET,FLAG};
+unsigned char ua_menssage[5] = {FLAG,A,C_UA,A^C_UA,FLAG};
 
 // SIZE of maximum acceptable payload.
 // Maximum number of bytes that application layer should send to link layer
