@@ -117,28 +117,54 @@ int stateMachineHandler(unsigned char byte){
     case START:
         if(byte == FLAG){
             state = FLAG_RCV;
+            buf[0] = byte;
         }
         break;
     
     case FLAG_RCV:
         if(byte == A){
             state = A_RCV;
+            buf[1] = byte;
         } else if(byte != FLAG){
             state = START;
         }
         break;
 
     case A_RCV:
-        if(byte == C_SET){
+        if(c_check(byte)){
             state = C_RCV;
-        } else if(byte != FLAG){
+            buf[2] = byte;
+        } else if(byte == FLAG){
+            state = FLAG_RCV;
+        }
+        state = START;
+        break;
+
+    case C_RCV:
+        if(byte == (buf[1] ^ buf[2])){
+            state = BCC_OK;
+            buf[3] = byte;
+        } else if(byte == FLAG){
+            state = FLAG_RCV;
+        } else {
+            state = START;
+        }
+        break;
+
+    case BCC_OK:
+        if(byte == FLAG){
+            state = STOP;
+            buf[4] = byte;
+        } else {
             state = START;
         }
         break;
 
     default:
+        return 0;
         break;
     }
+    return 1;
 }
 
 int c_check(unsigned char byte){
