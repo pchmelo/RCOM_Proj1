@@ -126,19 +126,23 @@ int llwrite(const unsigned char *buf, int bufSize){
         }
 
         control = NOTHING_C;
+        //delay(3);
 
         if(!read_aux()){
             perror("Error read_aux function");
             return 1; 
         }
 
-        
+        //mensagem recebida com sucesso
+        if(handle_llwrite_reception()){
+            flag = false;
+            
+        }
+    
+        control = NOTHING_C;
     }
 
     
-
-    
-
     return 0;
 }
 
