@@ -3,8 +3,8 @@ typedef enum {
     FLAG_RCV,
     A_RCV,
     C_RCV,
-    BCC_OK,
     STOP,
+    DATA,
     END
 } State;
 
@@ -38,4 +38,12 @@ typedef enum{
 
 unsigned char set_menssage[5] = {FLAG,A,C_SET,A^C_SET,FLAG};
 unsigned char ua_menssage[5] = {FLAG,A,C_UA,A^C_UA,FLAG};
+
+unsigned char rr0_menssage[5] = {FLAG,A,C_RR0,A^C_RR0,FLAG};
+unsigned char rr1_menssage[5] = {FLAG,A,C_RR1,A^C_RR1,FLAG};
+
+unsigned char rej0_menssage[5] = {FLAG,A,C_REJ0,A^C_REJ0,FLAG};
+unsigned char rej1_menssage[5] = {FLAG,A,C_REJ1,A^C_REJ1,FLAG};
+
+unsigned char disc_menssage[5] = {FLAG,A,C_DISC,A^C_DISC,FLAG};
 

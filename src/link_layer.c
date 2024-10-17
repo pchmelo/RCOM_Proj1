@@ -51,19 +51,27 @@ int llopen(LinkLayer connectionParameters){
 
 //temos que depois dar set a um alarm e lidar com isso
 int llopenRx(){ 
+    
     control = NOTHING_C;
+    unsigned char *readBuf;
+    int numBytes;
 
     while(control != SET){
-        if(!read_aux()){
-            perror("Error reading SET");
+        readBuf = read_aux(numBytes);
+
+        if(readBuf == NULL){
+            perror("Error reading UA");
+            free(readBuf);
             return -1;
         }
+
     }
 
     control = NOTHING_C;
+    free(readBuf);
 
     write_aux(ua_menssage, 5);
-
+    
     return 1;
 }
 
@@ -72,15 +80,22 @@ int llopenTx(){
     write_aux(set_menssage, 5); // Send SET
     
     control = NOTHING_C;
+    unsigned char *readBuf;
+    int numBytes;
 
     while(control != UA){
-        if(!read_aux()){
+        readBuf = read_aux(numBytes);
+
+        if(readBuf == NULL){
             perror("Error reading UA");
+            free(readBuf);
             return -1;
         }
+        
     }
 
     control = NOTHING_C;
+    free(readBuf);
 
     return 1;
 }
@@ -108,7 +123,7 @@ int llwrite(const unsigned char *buf, int bufSize){
 
     if(newBuf == NULL){
         perror("Error encoding suffing");
-        return 1;
+        return -1;
     }
 
     unsigned char frame[bufSize + 6];
@@ -122,44 +137,82 @@ int llwrite(const unsigned char *buf, int bufSize){
     while(flag){
         if(!write_aux(frame, frameSize)){
             perror("Error writtin mensage");
-            return 1;
+            return -1;
         }
 
         control = NOTHING_C;
         //delay(3);
 
-        if(!read_aux()){
+        int numBytes;
+        unsigned char* readBuf = read_aux(numBytes);
+
+        if(readBuf == NULL){
             perror("Error read_aux function");
-            return 1; 
+            free(readBuf);
+            return -1; 
         }
 
         //mensagem recebida com sucesso
         if(handle_llwrite_reception()){
             flag = false;
-            
         }
     
         control = NOTHING_C;
+        free(readBuf);
     }
 
     
-    return 0;
+    return bufSize;
 }
 
 //receber frame
 //byte destuffing
 //verificar BCC2
 //enviar RR ou REJ dependendo da frame recebida
+//return -2 -> SET
+//return -3 -> DISC
+
 
 ////////////////////////////////////////////////
 // LLREAD
 ////////////////////////////////////////////////
 int llread(unsigned char *packet){
     // TODO
+    int numBytes;
+    unsigned char *readBuf;
+    control = NOTHING_C;
 
+    //colocar alarme
+    bool flag = true;
 
+    readBuf = read_aux(numBytes);
 
-    return 0;
+    if (readBuf == NULL){
+        perror("Error read_aux function");
+        free(readBuf);
+        return -1; 
+    }
+
+    unsigned char *newBuf;
+    int newBufSize;
+
+    //destuffing
+    newBuf = stuffing_decode(readBuf, numBytes, &newBufSize);
+
+    //verificar se há erros
+    int result = handle_llread_reception(newBuf, newBufSize);
+    free(readBuf);
+    free(newBuf);
+    control = NOTHING_C;
+
+    //mensagem recebida com sucesso
+    if(result == 1){
+        packet = newBuf;
+        return newBufSize;
+    }
+    
+    //alguma inconsistência
+    return result;
 }
 
 ////////////////////////////////////////////////
@@ -173,54 +226,71 @@ int llclose(int showStatistics)
     return clstat;
 }
 
-void stateMachineHandler(unsigned char byte){
+void stateMachineHandler(unsigned char byte, int *pos){
     switch (state){
     case START:
         if(byte == FLAG){
             state = FLAG_RCV;
-            buf[0] = byte;
+            buf[*pos] = byte;
+            *pos += 1;
         }
         break;
     
     case FLAG_RCV:
         if(byte == A){
             state = A_RCV;
-            buf[1] = byte;
+            buf[*pos] = byte;
+            *pos += 1;
         } else if(byte != FLAG){
             state = START;
+            *pos = 0;
         }
         break;
 
     case A_RCV:
         if(c_check(byte)){
             state = C_RCV;
-            buf[2] = byte;
+            buf[*pos] = byte;
+            *pos += 1;
         } else if(byte == FLAG){
             state = FLAG_RCV;
+            *pos = 1;
         }
-        state = START;
+        else{
+            state = START;
+            *pos = 0;
+        }
+        
         break;
 
     case C_RCV:
         if(byte == (buf[1] ^ buf[2])){
-            state = BCC_OK;
-            buf[3] = byte;
+            state = DATA;
+            buf[*pos] = byte;
+            *pos += 1;
         } else if(byte == FLAG){
             state = FLAG_RCV;
+            *pos = 1;
         } else {
             state = START;
+            *pos = 0;
         }
         break;
 
-    case BCC_OK:
+    case DATA:
         if(byte == FLAG){
             state = STOP;
-            buf[4] = byte;
+            buf[*pos] = byte;
+            *pos += 1;
         } else {
-            state = START;
+            state = DATA;
+            buf[*pos] = byte;
+            *pos += 1;
         }
         break;
     
+
+
     }
 }
 
@@ -270,20 +340,23 @@ int c_check(unsigned char byte){
 }
 
 //adicionar alarme
-int read_aux(){
+unsigned char* read_aux(int *readenBytes){
     state = START;
     unsigned char byte;
+    int pos = 0;
 
     while(state != STOP){
-
         if(readByteSerialPort(byte)){
-            stateMachineHandler(byte);
+            stateMachineHandler(byte, pos);
         }
     }
 
+    unsigned char *mensseBuf = (unsigned char *)realloc(buf, pos * sizeof(unsigned char));
+    readenBytes = pos;
+
     state = END;
 
-    return 1;
+    return mensseBuf;
 }
 
 int write_aux(unsigned char mensage, int numBytes){
@@ -385,9 +458,9 @@ char calculate_BCC2(unsigned char *buf, int bufSize){
 }
 
 //verify BCC2 == D1 xor D2 xor ... xor Dn
-bool verify_BCC2(unsigned char *buf, int bufSize, char bcc2){
+bool verify_BCC2(unsigned char *buf, int bufSize){
     char bcc2_calc = calculateBCC2(buf, bufSize);
-    return bcc2 == bcc2_calc;
+    return buf[bufSize-2] == bcc2_calc;
 }
 
 int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char *frame, unsigned char bb2){
@@ -430,3 +503,58 @@ int handle_llwrite_reception(){
     return 0;
 }
 
+//return 1 -> RR
+//return -1 -> REJ
+//return 0 -> Same
+//return -2 -> SET
+//return -3 -> DISC
+//return -4 -> Unknown
+
+int handle_llread_reception(unsigned char *buf, int bufSize){
+    
+    //verifica se é SET ou DISC
+    if(control == C_SET){
+        //enviar UA
+        write_aux(ua_menssage, 5);
+        return -2;
+    }
+    else if(control == C_DISC){
+        //enviar DISC
+        write_aux(disc_menssage, 5);
+        return -3;
+    }
+
+    //verifica o BBC2
+    if(!verify_BCC2(buf, bufSize)){
+        //enviar REJ
+        if(frame_num == 0){
+            //enviar REJ0
+            write_aux(rej0_menssage, 5);
+        } else {
+            //enviar REJ1
+            write_aux(rej1_menssage, 5);
+        }
+        return -1;
+    }
+
+    //verifica se é frame_0 ou frame_1
+
+    if(control == C_FRAME0){
+        //enviar RR1
+        write_aux(rr1_menssage, 5);
+        if(frame_num == 0){
+            return 1;
+        } else {
+            return 0;
+        }
+    } else if(control == C_FRAME1){
+        //enviar RR0
+        write_aux(rr0_menssage, 5);
+        if(frame_num == 1){
+            return 1;
+        } else {
+            return 0;
+        }
+    }
+    return -4;
+}
