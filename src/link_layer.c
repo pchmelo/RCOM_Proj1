@@ -2,6 +2,9 @@
 
 #include "link_layer.h"
 #include "serial_port.h"
+#include <stdlib.h>
+#include <stdbool.h>
+#include "macros.h"
 
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
@@ -86,11 +89,24 @@ int llopenTx(){
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
+
+//vai montar a frame neste formato: FLAG A C BCC1 D1 D2 ... Dn BCC2 FLAG
+// A -> 0x03
+// C -> 0x00 ou 0x80 (dependendo do frame)
+// calcular BCC2
+// byte stuffing
+// montar e enviar a frame
+
 int llwrite(const unsigned char *buf, int bufSize){
     // TODO
 
+
     return 0;
 }
+
+//byte destuffing
+//verificar BCC2
+//enviar RR ou REJ dependendo da frame recebida
 
 ////////////////////////////////////////////////
 // LLREAD
@@ -192,6 +208,14 @@ int c_check(unsigned char byte){
         case C_DISC:
             control = DISC;
             break;
+        
+        case C_FRAME0:
+            control = FRAME0;
+            break;
+        
+        case C_FRAME1:
+            control = FRAME1;
+            break;
 
         default:
             return 0;
@@ -223,3 +247,99 @@ int write_aux(unsigned char mensage, int numBytes){
 
     return 1;
 }
+
+//0x7e -> 0x7d 0x5e
+//0x7d -> 0x7d 0x5d
+unsigned char* suffing_encode(unsigned char *buf, int bufSize, int *newBufSize){
+    
+    int maxBufSize = 2 * bufSize;
+    unsigned char *newBuf = (unsigned char *)malloc(maxBufSize * sizeof(unsigned char));
+
+    if(newBuf == NULL){
+        perror("Error allocating memory");
+        return NULL;
+    }
+
+    int j = 0;
+
+    for(int i = 0; i < bufSize; i++){
+        if(buf[i] == 0x7e){
+            newBuf[j] = 0x7d;
+            j++;
+            newBuf[j] = 0x5e;
+            j++;
+        } else if(buf[i] == 0x7d){
+            newBuf[j] = 0x7d;
+            j++;
+            newBuf[j] = 0x5d;
+            j++;
+        } else {
+            newBuf[j] = buf[i];
+            j++;
+        }
+    }
+
+    *newBufSize = j;
+    newBuf = (unsigned char *)realloc(newBuf, j * sizeof(unsigned char));
+    if(newBuf == NULL){
+        perror("Error reallocating memory");
+        return NULL;
+    }
+
+    return newBuf;
+}
+
+//0x7d 0x5e -> 0x7e
+//0x7d 0x5d -> 0x7d
+unsigned char* stuffing_decode(unsigned char *buf, int bufSize, int *newBufSize){
+    int maxBufSize = bufSize;
+    unsigned char *newBuf = (unsigned char *)malloc(maxBufSize * sizeof(unsigned char));
+
+    if(newBuf == NULL){
+        perror("Error allocating memory");
+        return NULL;
+    }
+
+    int j = 0;
+
+    for(int i = 0; i < bufSize; i++){
+        if(buf[i] == 0x7d && buf[i+1] == 0x5e){
+            newBuf[j] = 0x7e;
+            j++;
+            i++;
+        } else if(buf[i] == 0x7d && buf[i+1] == 0x5d){
+            newBuf[j] = 0x7d;
+            j++;
+            i++;
+        } else {
+            newBuf[j] = buf[i];
+            j++;
+            i++;
+        }
+    }
+
+    *newBufSize = j;
+    newBuf = (unsigned char *)realloc(newBuf, j * sizeof(unsigned char));
+    if(newBuf == NULL){
+        perror("Error reallocating memory");
+        return NULL;
+    }
+
+    return newBuf;
+}
+
+//calculate BCC2 = D1 xor D2 xor ... xor Dn
+char calculate_BCC2(unsigned char *buf, int bufSize){
+    char bcc2 = 0x00;
+    for(int i = 0; i < bufSize; i++){
+        bcc2 ^= buf[i];
+    }
+    return bcc2;
+}
+
+//verify BCC2 == D1 xor D2 xor ... xor Dn
+bool verify_BCC2(unsigned char *buf, int bufSize, char bcc2){
+    char bcc2_calc = calculateBCC2(buf, bufSize);
+    return bcc2 == bcc2_calc;
+}
+
