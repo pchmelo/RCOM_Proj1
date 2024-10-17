@@ -10,12 +10,12 @@
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
 //Global Variables
-#define BUF_SIZE 255
-
-unsigned char buf[BUF_SIZE] = {0};
+#define BufferSize 255
+unsigned char buf[BufferSize] = {0};
 
 State state = END;
 C_TYPE control = NOTHING_C;
+bool frame_num = 0;
 
 ////////////////////////////////////////////////
 // LLOPEN
@@ -96,14 +96,53 @@ int llopenTx(){
 // calcular BCC2
 // byte stuffing
 // montar e enviar a frame
+// esperar por RR ou REJ
 
 int llwrite(const unsigned char *buf, int bufSize){
-    // TODO
+    int bufSize = 0;
+    
+    unsigned char bcc2 = calculate_BCC2(buf, bufSize);
+    unsigned char *newBuf;
 
+    newBuf = suffing_encode(buf, bufSize, &bufSize);
+
+    if(newBuf == NULL){
+        perror("Error encoding suffing");
+        return 1;
+    }
+
+    unsigned char frame[bufSize + 6];
+
+    int frameSize = mount_frame_menssage(bufSize, newBuf, frame, bcc2);
+    free(newBuf);
+
+    //colocar alarme
+    bool flag = true;
+
+    while(flag){
+        if(!write_aux(frame, frameSize)){
+            perror("Error writtin mensage");
+            return 1;
+        }
+
+        control = NOTHING_C;
+
+        if(!read_aux()){
+            perror("Error read_aux function");
+            return 1; 
+        }
+
+        
+    }
+
+    
+
+    
 
     return 0;
 }
 
+//receber frame
 //byte destuffing
 //verificar BCC2
 //enviar RR ou REJ dependendo da frame recebida
@@ -113,6 +152,8 @@ int llwrite(const unsigned char *buf, int bufSize){
 ////////////////////////////////////////////////
 int llread(unsigned char *packet){
     // TODO
+
+
 
     return 0;
 }
@@ -224,11 +265,13 @@ int c_check(unsigned char byte){
     return 1;
 }
 
+//adicionar alarme
 int read_aux(){
     state = START;
     unsigned char byte;
 
     while(state != STOP){
+
         if(readByteSerialPort(byte)){
             stateMachineHandler(byte);
         }
@@ -341,5 +384,45 @@ char calculate_BCC2(unsigned char *buf, int bufSize){
 bool verify_BCC2(unsigned char *buf, int bufSize, char bcc2){
     char bcc2_calc = calculateBCC2(buf, bufSize);
     return bcc2 == bcc2_calc;
+}
+
+int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char *frame, unsigned char bb2){
+    frame[0] = FLAG;
+    frame[1] = A;
+
+    if(frame_num == FRAME0){
+        frame[2] = C_FRAME0;
+    } else {
+        frame[2] = C_FRAME1;
+    }
+
+    frame[3] = A ^ control;
+    for(int i = 0; i < numBytesMenssage; i++){
+        frame[i+4] = buf[i];
+    }
+
+    frame[numBytesMenssage + 4] = bb2;
+    frame[numBytesMenssage + 5] = FLAG;
+
+    return numBytesMenssage + 6;
+}
+
+
+
+
+int handle_llwrite_reception(){
+    //frame_0 recebido com sucesso envia o frame_1 ou o contrário
+    if((frame_num == 0 && control == RR1) || (frame_num == FRAME1 && control == RR0)){
+        !frame_num;
+        return 1;
+    }
+    //frame_0 foi recebido, mas com erros ou o contrário
+    else if((frame_num == 0 && control == RR0) || (frame_num == FRAME1 && control == RR1)){
+        return 2;
+    }
+
+    //lidar com os restos dos casos aqui
+
+    return 0;
 }
 
