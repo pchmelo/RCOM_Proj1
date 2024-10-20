@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include "macros.h"
+#include <signal.h>
 
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
@@ -16,6 +17,18 @@ unsigned char buf[BufferSize] = {0};
 State state = END;
 C_TYPE control = NOTHING_C;
 bool frame_num = 0;
+LinkLayerRole role;
+
+int alarmCounter = 0;
+int timeout = 0;
+int restransmissions = 0;
+bool alarmFlag = false;
+
+void alarmHandler(int signal){
+    alarmFlag = true;
+    alarmCounter++;
+}
+
 
 ////////////////////////////////////////////////
 // LLOPEN
@@ -26,11 +39,15 @@ int llopen(LinkLayer connectionParameters){
         return -1;
     }
 
+    role = connectionParameters.role;
+    timeout = connectionParameters.timeout;
+    restransmissions = connectionParameters.nRetransmissions;
+
     // TODO
     if(connectionParameters.role == LlRx){
         // Wait for a SET then ...
         // Send UA
-        if(!llopenRx){
+        if(!llopenRx()){
             perror("Error llopenRx");
             return -1;
         }
@@ -38,7 +55,7 @@ int llopen(LinkLayer connectionParameters){
     } else {
         // Send SET (write)
         // Wait UA (read)
-        if(!llopenTx){
+        if(!llopenTx()){
            perror("Error llopenTx");
            return -1; 
         }
@@ -51,13 +68,14 @@ int llopen(LinkLayer connectionParameters){
 
 //temos que depois dar set a um alarm e lidar com isso
 int llopenRx(){ 
+
     
     control = NOTHING_C;
     unsigned char *readBuf;
     int numBytes;
 
     while(control != SET){
-        readBuf = read_aux(numBytes);
+        readBuf = read_aux(numBytes, false);
 
         if(readBuf == NULL){
             perror("Error reading UA");
@@ -70,34 +88,42 @@ int llopenRx(){
     control = NOTHING_C;
     free(readBuf);
 
-    write_aux(ua_menssage, 5);
+    write_aux(ua_menssage_tx, 5);
     
     return 1;
 }
 
 //temos que depois dar set a um alarm e lidar com isso
+//return 1 -> UA
+//return 0 -> Tries expired
 int llopenTx(){
-    write_aux(set_menssage, 5); // Send SET
+    (void) signal(SIGALRM, alarmHandler);
     
-    control = NOTHING_C;
     unsigned char *readBuf;
     int numBytes;
+    int tries = restransmissions;
+    control = NOTHING_C;
 
-    while(control != UA){
-        readBuf = read_aux(numBytes);
+    while(tries > 0 || control != UA){
+        write_aux(set_menssage, 5); // Send SET
+        alarm(timeout);
+        alarmFlag = false;
+
+        
+        readBuf = read_aux(numBytes, true);
 
         if(readBuf == NULL){
             perror("Error reading UA");
             free(readBuf);
             return -1;
         }
-        
+        tries--;
     }
+    
 
-    control = NOTHING_C;
     free(readBuf);
 
-    return 1;
+    return control == UA;
 }
 
 
@@ -133,18 +159,22 @@ int llwrite(const unsigned char *buf, int bufSize){
 
     //colocar alarme
     bool flag = true;
+    int tries = restransmissions;
 
-    while(flag){
+    int numBytes;
+    unsigned char* readBuf;
+
+    while(tries < 0 || flag){
+        alarmFlag = false;
+        alarm(timeout);
+
         if(!write_aux(frame, frameSize)){
             perror("Error writtin mensage");
             return -1;
         }
 
         control = NOTHING_C;
-        //delay(3);
-
-        int numBytes;
-        unsigned char* readBuf = read_aux(numBytes);
+        readBuf = read_aux(numBytes, true);
 
         if(readBuf == NULL){
             perror("Error read_aux function");
@@ -152,16 +182,22 @@ int llwrite(const unsigned char *buf, int bufSize){
             return -1; 
         }
 
-        //mensagem recebida com sucesso
+            //mensagem recebida com sucesso
         if(handle_llwrite_reception()){
             flag = false;
         }
-    
-        control = NOTHING_C;
-        free(readBuf);
+
+        
+        tries--;
     }
 
-    
+    free(readBuf);
+    control = NOTHING_C;
+
+    if(flag){
+        return -1;
+    }
+
     return bufSize;
 }
 
@@ -182,10 +218,7 @@ int llread(unsigned char *packet){
     unsigned char *readBuf;
     control = NOTHING_C;
 
-    //colocar alarme
-    bool flag = true;
-
-    readBuf = read_aux(numBytes);
+    readBuf = read_aux(numBytes, false);
 
     if (readBuf == NULL){
         perror("Error read_aux function");
@@ -218,9 +251,65 @@ int llread(unsigned char *packet){
 ////////////////////////////////////////////////
 // LLCLOSE
 ////////////////////////////////////////////////
-int llclose(int showStatistics)
-{
-    // TODO
+int llclose(int showStatistics){
+
+    unsigned char *readBuf;
+    int numBytes;
+    (void) signal(SIGALRM, alarmHandler);
+    int tries = restransmissions;
+    bool flag = true;
+
+    //enviar DISC e receber UA, caso contrário reenviar DISC
+    if(role == LlRx){
+        while(tries > 0 || flag){
+            //read UA
+
+            alarm(timeout);
+            alarmFlag = false;
+
+            control = NOTHING_C;
+            readBuf = read_aux(numBytes, true);
+
+            if(control == DISC){
+                //enviar DISC
+                write_aux(disc_menssage_rx, 5);
+            } else if(control == UA){ 
+                flag = false;
+            }
+            
+            tries--;
+        }
+    }
+    //enviar DISC, receber DISC e enviar UA
+    else{
+        while (tries > 0 || flag){
+            //eniando DISC
+            write_aux(disc_menssage, 5);
+            
+            alarm(timeout);
+            alarmFlag = false;
+            
+            //receber DISC
+            control = NOTHING_C;
+            readBuf = read_aux(numBytes, true);
+
+            if(control == DISC){
+                //enviar UA
+                write_aux(ua_menssage_tx, 5);
+                flag = false;
+            } 
+            
+            tries--;
+        }
+        
+        control = NOTHING_C;
+        
+    }
+
+    free(readBuf);
+    if(flag){
+        return -1;
+    }
 
     int clstat = closeSerialPort();
     return clstat;
@@ -237,7 +326,7 @@ void stateMachineHandler(unsigned char byte, int *pos){
         break;
     
     case FLAG_RCV:
-        if(byte == A){
+        if(byte == A_Tx || byte == A_Rx){
             state = A_RCV;
             buf[*pos] = byte;
             *pos += 1;
@@ -340,16 +429,25 @@ int c_check(unsigned char byte){
 }
 
 //adicionar alarme
-unsigned char* read_aux(int *readenBytes){
+unsigned char* read_aux(int *readenBytes, bool alarm){
     state = START;
     unsigned char byte;
     int pos = 0;
-
-    while(state != STOP){
-        if(readByteSerialPort(byte)){
-            stateMachineHandler(byte, pos);
+    if(alarm){
+        while(state != STOP || alarmFlag == false){
+            if(readByteSerialPort(byte)){
+                stateMachineHandler(byte, pos);
+            }
         }
     }
+    else{
+        while(state != STOP){
+            if(readByteSerialPort(byte)){
+                stateMachineHandler(byte, pos);
+            }
+        }
+    }
+    
 
     unsigned char *mensseBuf = (unsigned char *)realloc(buf, pos * sizeof(unsigned char));
     readenBytes = pos;
@@ -465,7 +563,7 @@ bool verify_BCC2(unsigned char *buf, int bufSize){
 
 int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char *frame, unsigned char bb2){
     frame[0] = FLAG;
-    frame[1] = A;
+    frame[1] = A_Tx;
 
     if(frame_num == FRAME0){
         frame[2] = C_FRAME0;
@@ -473,7 +571,7 @@ int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char
         frame[2] = C_FRAME1;
     }
 
-    frame[3] = A ^ control;
+    frame[3] = A_Tx ^ control;
     for(int i = 0; i < numBytesMenssage; i++){
         frame[i+4] = buf[i];
     }
@@ -495,7 +593,7 @@ int handle_llwrite_reception(){
     }
     //frame_0 foi recebido, mas com erros ou o contrário
     else if((frame_num == 0 && control == RR0) || (frame_num == FRAME1 && control == RR1)){
-        return 2;
+        return 0;
     }
 
     //lidar com os restos dos casos aqui
@@ -515,7 +613,7 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
     //verifica se é SET ou DISC
     if(control == C_SET){
         //enviar UA
-        write_aux(ua_menssage, 5);
+        write_aux(ua_menssage_tx, 5);
         return -2;
     }
     else if(control == C_DISC){
