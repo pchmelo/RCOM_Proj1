@@ -104,7 +104,7 @@ int llopenTx(){
     int tries = restransmissions;
     control = NOTHING_C;
 
-    while(tries > 0 || control != UA){
+    while(tries > 0 && control != UA){
         write_aux(set_menssage, 5); // Send SET
         alarm(timeout);
         alarmFlag = false;
@@ -164,7 +164,7 @@ int llwrite(const unsigned char *buf, int bufSize){
     int numBytes;
     unsigned char* readBuf;
 
-    while(tries < 0 || flag){
+    while(tries < 0 && flag){
         alarmFlag = false;
         alarm(timeout);
 
@@ -258,10 +258,11 @@ int llclose(int showStatistics){
     (void) signal(SIGALRM, alarmHandler);
     int tries = restransmissions;
     bool flag = true;
+    bool flag_2 = true;
 
     //enviar DISC e receber UA, caso contrário reenviar DISC
     if(role == LlRx){
-        while(tries > 0 || flag){
+        while(tries > 0 && flag){
             //read UA
 
             alarm(timeout);
@@ -272,17 +273,21 @@ int llclose(int showStatistics){
 
             if(control == DISC){
                 //enviar DISC
-                write_aux(disc_menssage_rx, 5);
+                write_aux(disc_menssage, 5);
             } else if(control == UA){ 
                 flag = false;
             }
+            else{
+                write_aux(disc_menssage_rx, 5);
+            }
+
             
             tries--;
         }
     }
     //enviar DISC, receber DISC e enviar UA
     else{
-        while (tries > 0 || flag){
+        while (tries > 0 && flag){
             //eniando DISC
             write_aux(disc_menssage, 5);
             
@@ -297,6 +302,25 @@ int llclose(int showStatistics){
                 //enviar UA
                 write_aux(ua_menssage_tx, 5);
                 flag = false;
+                while(tries > 0 && flag_2){
+                    alarm(timeout);
+                    alarmFlag = false;
+
+                    control = NOTHING_C;
+                    readBuf = read_aux(numBytes, true);
+
+                    if(control == DISC){
+                        write_aux(ua_menssage_rx, 5);
+                    }
+                    else if(control == NOTHING_C){
+                        flag_2 = false;
+                        break;
+                    }
+                        
+
+                    tries--;
+                }
+
             } 
             
             tries--;
@@ -307,7 +331,7 @@ int llclose(int showStatistics){
     }
 
     free(readBuf);
-    if(flag){
+    if(flag || (flag_2 && role == LlTx)){
         return -1;
     }
 
