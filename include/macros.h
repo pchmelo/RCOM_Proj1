@@ -3,7 +3,9 @@ typedef enum {
     FLAG_RCV,
     A_RCV,
     C_RCV,
-    STOP,
+    STOP_BIG,
+    STOP_SMALL,
+    BCC_OK,
     DATA,
     END
 } State;
@@ -18,6 +20,7 @@ typedef enum{
     DISC,
     FRAME1,
     FRAME0,
+    ERROR,
     NOTHING_C
 } C_TYPE;
 

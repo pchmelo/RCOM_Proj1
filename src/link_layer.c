@@ -14,6 +14,9 @@
 #define BufferSize 255
 unsigned char buf[BufferSize] = {0};
 
+//active debug
+bool debug = true;
+
 State state = END;
 C_TYPE control = NOTHING_C;
 bool frame_num = 0;
@@ -378,7 +381,7 @@ void stateMachineHandler(unsigned char byte, int *pos){
 
     case C_RCV:
         if(byte == (buf[1] ^ buf[2])){
-            state = DATA;
+            state = BCC_OK;
             buf[*pos] = byte;
             *pos += 1;
         } else if(byte == FLAG){
@@ -389,10 +392,22 @@ void stateMachineHandler(unsigned char byte, int *pos){
             *pos = 0;
         }
         break;
+    case BCC_OK:
+        if(byte == FLAG){
+            state = STOP_SMALL;
+            buf[*pos] = byte;
+            *pos += 1;
+        } else {
+            state = DATA;
+            buf[*pos] = byte;
+            *pos += 1;
+        }
+        
+        break;
 
     case DATA:
         if(byte == FLAG){
-            state = STOP;
+            state = STOP_BIG;
             buf[*pos] = byte;
             *pos += 1;
         } else {
@@ -458,14 +473,14 @@ unsigned char* read_aux(int *readenBytes, bool alarm){
     unsigned char byte;
     int pos = 0;
     if(alarm){
-        while(state != STOP || alarmFlag == false){
+        while(state != STOP_BIG && state != STOP_SMALL && alarmFlag == false){
             if(readByteSerialPort(byte)){
                 stateMachineHandler(byte, pos);
             }
         }
     }
     else{
-        while(state != STOP){
+        while(state != STOP_BIG && state != STOP_SMALL){
             if(readByteSerialPort(byte)){
                 stateMachineHandler(byte, pos);
             }
@@ -476,15 +491,25 @@ unsigned char* read_aux(int *readenBytes, bool alarm){
     unsigned char *mensseBuf = (unsigned char *)realloc(buf, pos * sizeof(unsigned char));
     readenBytes = pos;
 
+    final_check();
+
     state = END;
+
+    if(debug){
+        debug_read(mensseBuf, readenBytes);
+    }
 
     return mensseBuf;
 }
 
-int write_aux(unsigned char mensage, int numBytes){
+int write_aux(unsigned char* mensage, int numBytes){
     if(writeBytesSerialPort(mensage, numBytes) == -1){
         perror("Error sending SET");
         return -1;
+    }
+
+    if(debug){
+        debug_write(mensage, numBytes);
     }
 
     return 1;
@@ -679,4 +704,38 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
         }
     }
     return -4;
+}
+
+void debug_write(unsigned char *mensage, int numBytes){
+    printf("%d bytes written\n", numBytes);
+    
+    printf("Sent: ");
+    for(int i = 0; i < numBytes; i++){
+        printf("%x ", mensage[i]);
+    }
+    printf("\n");
+
+}
+
+void debug_read(unsigned char *mensage, int numBytes){
+    if(mensage == NULL){
+        printf("Error reading mensage\n");
+        return;
+    }
+    
+    printf("%d bytes read\n", numBytes);
+    
+    printf("Received: ");
+    for(int i = 0; i < numBytes; i++){
+        printf("%x ", mensage[i]);
+    }
+    printf("\n");
+}
+
+void final_check(){
+    if(state == STOP_BIG){
+        if(control != C_FRAME1 || control != C_FRAME0){
+            control = ERROR;
+        }
+    }
 }
