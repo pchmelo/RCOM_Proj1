@@ -1,3 +1,6 @@
+#ifndef MACROS_H
+#define MACROS_H
+
 typedef enum {
     START,
     FLAG_RCV,
@@ -52,3 +55,20 @@ unsigned char rej1_menssage[5] = {FLAG,A_Tx,C_REJ1,A_Tx^C_REJ1,FLAG};
 
 unsigned char disc_menssage[5] = {FLAG,A_Tx,C_DISC,A_Tx^C_DISC,FLAG};
 unsigned char disc_menssage_rx[5] = {FLAG,A_Rx,C_DISC,A_Rx^C_DISC,FLAG};
+
+int llopenRx();
+int llopenTx();
+unsigned char* read_aux(int *readenBytes, bool alarm);
+int write_aux(unsigned char *mensage, int numBytes);
+unsigned char* suffing_encode(const unsigned char *buf, int bufSize, int *newBufSize);
+unsigned char* stuffing_decode(unsigned char *buf, int bufSize, int *newBufSize);
+char calculate_BCC2(const unsigned char *buf, int bufSize);
+int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char *frame, unsigned char bb2);
+void final_check();
+void debug_write(unsigned char *mensage, int numBytes);
+void debug_read(unsigned char *mensage, int numBytes);
+int c_check(unsigned char byte);
+int handle_llwrite_reception();
+int handle_llread_reception(unsigned char *buf, int bufSize);
+
+#endif

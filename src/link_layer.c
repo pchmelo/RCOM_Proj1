@@ -6,6 +6,9 @@
 #include <stdbool.h>
 #include "macros.h"
 #include <signal.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
 
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
@@ -20,7 +23,7 @@ bool debug = true;
 State state = END;
 C_TYPE control = NOTHING_C;
 bool frame_num = 0;
-LinkLayerRole role;
+LinkLayerRole my_role;
 
 int alarmCounter = 0;
 int timeout = 0;
@@ -42,7 +45,7 @@ int llopen(LinkLayer connectionParameters){
         return -1;
     }
 
-    role = connectionParameters.role;
+    my_role = connectionParameters.role;
     timeout = connectionParameters.timeout;
     restransmissions = connectionParameters.nRetransmissions;
 
@@ -78,7 +81,7 @@ int llopenRx(){
     int numBytes;
 
     while(control != SET){
-        readBuf = read_aux(numBytes, false);
+        readBuf = read_aux(&numBytes, false);
 
         if(readBuf == NULL){
             perror("Error reading UA");
@@ -113,7 +116,7 @@ int llopenTx(){
         alarmFlag = false;
 
         
-        readBuf = read_aux(numBytes, true);
+        readBuf = read_aux(&numBytes, true);
 
         if(readBuf == NULL){
             perror("Error reading UA");
@@ -143,21 +146,21 @@ int llopenTx(){
 // esperar por RR ou REJ
 
 int llwrite(const unsigned char *buf, int bufSize){
-    int bufSize = 0;
+    int localBufSize = 0;
     
     unsigned char bcc2 = calculate_BCC2(buf, bufSize);
     unsigned char *newBuf;
 
-    newBuf = suffing_encode(buf, bufSize, &bufSize);
+    newBuf = suffing_encode(buf, bufSize, &localBufSize);
 
     if(newBuf == NULL){
         perror("Error encoding suffing");
         return -1;
     }
 
-    unsigned char frame[bufSize + 6];
+    unsigned char frame[localBufSize + 6];
 
-    int frameSize = mount_frame_menssage(bufSize, newBuf, frame, bcc2);
+    int frameSize = mount_frame_menssage(localBufSize, newBuf, frame, bcc2);
     free(newBuf);
 
     //colocar alarme
@@ -177,7 +180,7 @@ int llwrite(const unsigned char *buf, int bufSize){
         }
 
         control = NOTHING_C;
-        readBuf = read_aux(numBytes, true);
+        readBuf = read_aux(&numBytes, true);
 
         if(readBuf == NULL){
             perror("Error read_aux function");
@@ -221,7 +224,7 @@ int llread(unsigned char *packet){
     unsigned char *readBuf;
     control = NOTHING_C;
 
-    readBuf = read_aux(numBytes, false);
+    readBuf = read_aux(&numBytes, false);
 
     if (readBuf == NULL){
         perror("Error read_aux function");
@@ -238,14 +241,16 @@ int llread(unsigned char *packet){
     //verificar se há erros
     int result = handle_llread_reception(newBuf, newBufSize);
     free(readBuf);
-    free(newBuf);
     control = NOTHING_C;
 
     //mensagem recebida com sucesso
     if(result == 1){
         packet = newBuf;
+        free(newBuf);
         return newBufSize;
     }
+
+    free(newBuf);
     
     //alguma inconsistência
     return result;
@@ -264,7 +269,7 @@ int llclose(int showStatistics){
     bool flag_2 = true;
 
     //enviar DISC e receber UA, caso contrário reenviar DISC
-    if(role == LlRx){
+    if(my_role == LlRx){
         while(tries > 0 && flag){
             //read UA
 
@@ -272,7 +277,7 @@ int llclose(int showStatistics){
             alarmFlag = false;
 
             control = NOTHING_C;
-            readBuf = read_aux(numBytes, true);
+            readBuf = read_aux(&numBytes, true);
 
             if(control == DISC){
                 //enviar DISC
@@ -299,7 +304,7 @@ int llclose(int showStatistics){
             
             //receber DISC
             control = NOTHING_C;
-            readBuf = read_aux(numBytes, true);
+            readBuf = read_aux(&numBytes, true);
 
             if(control == DISC){
                 //enviar UA
@@ -310,7 +315,7 @@ int llclose(int showStatistics){
                     alarmFlag = false;
 
                     control = NOTHING_C;
-                    readBuf = read_aux(numBytes, true);
+                    readBuf = read_aux(&numBytes, true);
 
                     if(control == DISC){
                         write_aux(ua_menssage_rx, 5);
@@ -334,7 +339,7 @@ int llclose(int showStatistics){
     }
 
     free(readBuf);
-    if(flag || (flag_2 && role == LlTx)){
+    if(flag || (flag_2 && my_role == LlTx)){
         return -1;
     }
 
@@ -344,79 +349,80 @@ int llclose(int showStatistics){
 
 void stateMachineHandler(unsigned char byte, int *pos){
     switch (state){
-    case START:
-        if(byte == FLAG){
-            state = FLAG_RCV;
-            buf[*pos] = byte;
-            *pos += 1;
-        }
-        break;
-    
-    case FLAG_RCV:
-        if(byte == A_Tx || byte == A_Rx){
-            state = A_RCV;
-            buf[*pos] = byte;
-            *pos += 1;
-        } else if(byte != FLAG){
-            state = START;
-            *pos = 0;
-        }
-        break;
-
-    case A_RCV:
-        if(c_check(byte)){
-            state = C_RCV;
-            buf[*pos] = byte;
-            *pos += 1;
-        } else if(byte == FLAG){
-            state = FLAG_RCV;
-            *pos = 1;
-        }
-        else{
-            state = START;
-            *pos = 0;
-        }
+        case START:
+            if(byte == FLAG){
+                state = FLAG_RCV;
+                buf[*pos] = byte;
+                *pos += 1;
+            }
+            break;
         
-        break;
+        case FLAG_RCV:
+            if(byte == A_Tx || byte == A_Rx){
+                state = A_RCV;
+                buf[*pos] = byte;
+                *pos += 1;
+            } else if(byte != FLAG){
+                state = START;
+                *pos = 0;
+            }
+            break;
 
-    case C_RCV:
-        if(byte == (buf[1] ^ buf[2])){
-            state = BCC_OK;
-            buf[*pos] = byte;
-            *pos += 1;
-        } else if(byte == FLAG){
-            state = FLAG_RCV;
-            *pos = 1;
-        } else {
-            state = START;
-            *pos = 0;
-        }
-        break;
-    case BCC_OK:
-        if(byte == FLAG){
-            state = STOP_SMALL;
-            buf[*pos] = byte;
-            *pos += 1;
-        } else {
-            state = DATA;
-            buf[*pos] = byte;
-            *pos += 1;
-        }
-        
-        break;
+        case A_RCV:
+            if(c_check(byte)){
+                state = C_RCV;
+                buf[*pos] = byte;
+                *pos += 1;
+            } else if(byte == FLAG){
+                state = FLAG_RCV;
+                *pos = 1;
+            }
+            else{
+                state = START;
+                *pos = 0;
+            }
+            
+            break;
 
-    case DATA:
-        if(byte == FLAG){
-            state = STOP_BIG;
-            buf[*pos] = byte;
-            *pos += 1;
-        } else {
-            state = DATA;
-            buf[*pos] = byte;
-            *pos += 1;
-        }
-        break;
-    
+        case C_RCV:
+            if(byte == (buf[1] ^ buf[2])){
+                state = BCC_OK;
+                buf[*pos] = byte;
+                *pos += 1;
+            } else if(byte == FLAG){
+                state = FLAG_RCV;
+                *pos = 1;
+            } else {
+                state = START;
+                *pos = 0;
+            }
+            break;
+        case BCC_OK:
+            if(byte == FLAG){
+                state = STOP_SMALL;
+                buf[*pos] = byte;
+                *pos += 1;
+            } else {
+                state = DATA;
+                buf[*pos] = byte;
+                *pos += 1;
+            }
+            
+            break;
+
+        case DATA:
+            if(byte == FLAG){
+                state = STOP_BIG;
+                buf[*pos] = byte;
+                *pos += 1;
+            } else {
+                state = DATA;
+                buf[*pos] = byte;
+                *pos += 1;
+            }
+            break;
+        default:
+            break;
 
 
     }
@@ -474,29 +480,29 @@ unsigned char* read_aux(int *readenBytes, bool alarm){
     int pos = 0;
     if(alarm){
         while(state != STOP_BIG && state != STOP_SMALL && alarmFlag == false){
-            if(readByteSerialPort(byte)){
-                stateMachineHandler(byte, pos);
+            if(readByteSerialPort(&byte)){
+                stateMachineHandler(byte, &pos);
             }
         }
     }
     else{
         while(state != STOP_BIG && state != STOP_SMALL){
-            if(readByteSerialPort(byte)){
-                stateMachineHandler(byte, pos);
+            if(readByteSerialPort(&byte)){
+                stateMachineHandler(byte, &pos);
             }
         }
     }
     
-
-    unsigned char *mensseBuf = (unsigned char *)realloc(buf, pos * sizeof(unsigned char));
-    readenBytes = pos;
+    unsigned char *mensseBuf = (unsigned char *)malloc(pos * sizeof(unsigned char));
+    memcpy(mensseBuf, buf, pos * sizeof(unsigned char));
+    readenBytes = &pos;
 
     final_check();
 
     state = END;
 
     if(debug){
-        debug_read(mensseBuf, readenBytes);
+        debug_read(mensseBuf, *readenBytes);
     }
 
     return mensseBuf;
@@ -517,7 +523,7 @@ int write_aux(unsigned char* mensage, int numBytes){
 
 //0x7e -> 0x7d 0x5e
 //0x7d -> 0x7d 0x5d
-unsigned char* suffing_encode(unsigned char *buf, int bufSize, int *newBufSize){
+unsigned char* suffing_encode(const unsigned char *buf, int bufSize, int *newBufSize){
     
     int maxBufSize = 2 * bufSize;
     unsigned char *newBuf = (unsigned char *)malloc(maxBufSize * sizeof(unsigned char));
@@ -596,7 +602,7 @@ unsigned char* stuffing_decode(unsigned char *buf, int bufSize, int *newBufSize)
 }
 
 //calculate BCC2 = D1 xor D2 xor ... xor Dn
-char calculate_BCC2(unsigned char *buf, int bufSize){
+char calculate_BCC2(const unsigned char *buf, int bufSize){
     char bcc2 = 0x00;
     for(int i = 0; i < bufSize; i++){
         bcc2 ^= buf[i];
@@ -606,7 +612,7 @@ char calculate_BCC2(unsigned char *buf, int bufSize){
 
 //verify BCC2 == D1 xor D2 xor ... xor Dn
 bool verify_BCC2(unsigned char *buf, int bufSize){
-    char bcc2_calc = calculateBCC2(buf, bufSize);
+    char bcc2_calc = calculate_BCC2(buf, bufSize);
     return buf[bufSize-2] == bcc2_calc;
 }
 
@@ -614,7 +620,7 @@ int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char
     frame[0] = FLAG;
     frame[1] = A_Tx;
 
-    if(frame_num == FRAME0){
+    if(!frame_num){
         frame[2] = C_FRAME0;
     } else {
         frame[2] = C_FRAME1;
@@ -636,12 +642,12 @@ int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char
 
 int handle_llwrite_reception(){
     //frame_0 recebido com sucesso envia o frame_1 ou o contrário
-    if((frame_num == 0 && control == RR1) || (frame_num == FRAME1 && control == RR0)){
-        !frame_num;
+    if((!frame_num && control == RR1) || (frame_num && control == RR0)){
+        frame_num = !frame_num;
         return 1;
     }
     //frame_0 foi recebido, mas com erros ou o contrário
-    else if((frame_num == 0 && control == RR0) || (frame_num == FRAME1 && control == RR1)){
+    else if((!frame_num && control == RR0) || (frame_num && control == RR1)){
         return 0;
     }
 
