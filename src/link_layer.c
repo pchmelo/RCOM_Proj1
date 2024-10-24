@@ -15,7 +15,7 @@
 
 //Global Variables
 #define BufferSize 255
-unsigned char buf[BufferSize] = {0};
+unsigned char buf[MAX_PAYLOAD_SIZE] = {0};
 
 //active debug
 bool debug = true;
@@ -245,6 +245,7 @@ int llread(unsigned char *packet){
 
     //mensagem recebida com sucesso
     if(result == 1){
+        newBuf[newBufSize - 1] = '\0';
         packet = newBuf;
         free(newBuf);
         return newBufSize;
@@ -564,9 +565,10 @@ unsigned char* suffing_encode(const unsigned char *buf, int bufSize, int *newBuf
 
 //0x7d 0x5e -> 0x7e
 //0x7d 0x5d -> 0x7d
+//remover duas flags, a, c e bcc1
 unsigned char* stuffing_decode(unsigned char *buf, int bufSize, int *newBufSize){
     int maxBufSize = bufSize;
-    unsigned char *newBuf = (unsigned char *)malloc(maxBufSize * sizeof(unsigned char));
+    unsigned char *newBuf = (unsigned char *)malloc((maxBufSize - 5) * sizeof(unsigned char));
 
     if(newBuf == NULL){
         perror("Error allocating memory");
@@ -575,7 +577,7 @@ unsigned char* stuffing_decode(unsigned char *buf, int bufSize, int *newBufSize)
 
     int j = 0;
 
-    for(int i = 0; i < bufSize; i++){
+    for(int i = 4; i < bufSize - 1; i++){
         if(buf[i] == 0x7d && buf[i+1] == 0x5e){
             newBuf[j] = 0x7e;
             j++;
@@ -612,8 +614,8 @@ char calculate_BCC2(const unsigned char *buf, int bufSize){
 
 //verify BCC2 == D1 xor D2 xor ... xor Dn
 bool verify_BCC2(unsigned char *buf, int bufSize){
-    char bcc2_calc = calculate_BCC2(buf, bufSize);
-    return buf[bufSize-2] == bcc2_calc;
+    char bcc2_calc = calculate_BCC2(buf, bufSize - 1);
+    return buf[bufSize-1] == bcc2_calc;
 }
 
 int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char *frame, unsigned char bb2){
@@ -698,7 +700,7 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
         if(frame_num == 0){
             return 1;
         } else {
-            return 0;
+            return -4;
         }
     } else if(control == C_FRAME1){
         //enviar RR0
@@ -706,10 +708,10 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
         if(frame_num == 1){
             return 1;
         } else {
-            return 0;
+            return -4;
         }
     }
-    return -4;
+    return -5;
 }
 
 void debug_write(unsigned char *mensage, int numBytes){
