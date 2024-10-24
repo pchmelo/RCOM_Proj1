@@ -1,13 +1,16 @@
 // Application layer protocol implementation
 
 #include "application_layer.h"
+#include "application_layer_aux.h"
 #include <math.h>
 #include <stdio.h>
 #include "link_layer.h"
 #include <string.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 LinkLayer connectionParameters;
+bool debug_application_layer = true;
 
 void applicationLayer(const char *serialPort, const char *role, int baudRate,
                       int nTries, int timeout, const char *filename){
@@ -40,6 +43,10 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     }
     else{
         // receber o ficheiro
+        if(receiveFile() == -1){
+            perror("Error receiving file");
+            return;
+        }
     }
 
     //fechar a conecção
@@ -72,7 +79,7 @@ int sendFile(const char *filename){
     return 1;
 }
 
-void receiveFile(){
+int receiveFile(){
     //receber o control frame para começar
 
     unsigned char* control_frame = (unsigned char*)malloc(MAX_PAYLOAD_SIZE);
@@ -84,7 +91,7 @@ void receiveFile(){
         if(res < 0){
             //lidar com os erros
             perror("Error receiving control frame");
-            return;
+            return -1;
         }
         else{
             //receber o control frame
@@ -92,12 +99,22 @@ void receiveFile(){
         }
     }
     
-    unsigned long file_size = 0;
-    unsigned char* filename = receiveControlPacket(control_frame, res, &file_size);
+    unsigned long int file_size = 0;
+    int filename_size = 0;
 
+    unsigned char* filename = receiveControlPacket(control_frame, &file_size, &filename_size);
+
+    //FILE* my_file = fopen((char *) filename, "wb+");
+    
+    if(debug_application_layer){
+        debug_control_frame_rx(filename, strlen((char *) filename), file_size);
+    }
+
+    free(filename);
     //receber o ficheiro
 
     //receber o cntrol frame para terminar a conecção
+    return 1;
 }
 
 unsigned char* create_control_frame(char c, const char* filename, long int file_size, unsigned int* final_control_size){
@@ -137,11 +154,66 @@ unsigned char* create_control_frame(char c, const char* filename, long int file_
         pos++;
     }
 
+    if(debug_application_layer){
+        debug_control_frame_tx(filename, L2, L1);
+    }
+
     return control_packet;
 }
 
-unsigned char* receiveControlPacket(unsigned char* control_frame, int res, &file_size){
+unsigned char* receiveControlPacket(unsigned char* control_frame, unsigned long int* file_size, int* filename_size){
 
+    //File Size
+    unsigned char L1 = control_frame[2];
+    unsigned char file_size_bytes[L1];
+
+    for (int i = 0; i < L1; i++) {
+        file_size_bytes[i] = control_frame[3 + i];
+    }
+
+    for(int i = 0; i < L1; i++){
+        *file_size += file_size_bytes[i] << (8 * (L1 - i - 1));
+    }
+
+    //Filename
+    unsigned char L2 = control_frame[4 + L1];
+    unsigned char* filename = (unsigned char*)malloc(L2);
+
+    for(int i = 0; i < L2; i++){
+        filename[i] = control_frame[5 + L1 + i];
+    }
+
+    *filename_size = L2;
+
+    return filename;
 }
+
+void debug_control_frame_tx(const char* filename, unsigned int filename_size, int size_of_file){
+    if(filename == NULL){
+        printf("Filename is NULL\n");
+        return;
+    }
+    
+    printf("Filename: ");
+    for(int i = 0; i < filename_size; i++){
+        printf("%x ", filename[i]);
+    }
+    printf("\n Filename size: %d\n", filename_size);
+}
+
+
+void debug_control_frame_rx(unsigned char* filename, unsigned int filename_size, int size_of_file){
+    if(filename == NULL){
+        printf("Filename is NULL\n");
+        return;
+    }
+    
+    printf("Filename: ");
+    for(int i = 0; i < filename_size; i++){
+        printf("%x ", filename[i]);
+    }
+    printf("\n Filename size: %d\n", filename_size);
+}
+
 
 
