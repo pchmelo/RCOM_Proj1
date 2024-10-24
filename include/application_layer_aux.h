@@ -8,5 +8,6 @@ unsigned char* create_control_frame(char c, const char* filename, long int file_
 unsigned char* receiveControlPacket(unsigned char* control_frame, unsigned long int* file_size, int* filename_size);
 void debug_control_frame_rx(unsigned char* filename, unsigned int filename_size, int size_of_file);
 void debug_control_frame_tx(const char* filename, unsigned int filename_size, int size_of_file);
+int calculate_octets(long int file_size);
 
 #endif

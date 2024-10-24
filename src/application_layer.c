@@ -2,7 +2,6 @@
 
 #include "application_layer.h"
 #include "application_layer_aux.h"
-#include <math.h>
 #include <stdio.h>
 #include "link_layer.h"
 #include <string.h>
@@ -120,8 +119,7 @@ int receiveFile(){
 unsigned char* create_control_frame(char c, const char* filename, long int file_size, unsigned int* final_control_size){
     unsigned int pos = 0;
     
-    float octs = log2f ((float)file_size/8.0);
-    int L1 = (int) ceil(octs);
+    int L1 = calculate_octets(file_size);
 
     int L2 = strlen(filename);
     *final_control_size = 5 + L1 + L2; //c + T1 + L1 + file_size + T2 + L2 + file_name
@@ -213,6 +211,20 @@ void debug_control_frame_rx(unsigned char* filename, unsigned int filename_size,
         printf("%x ", filename[i]);
     }
     printf("\n Filename size: %d\n", filename_size);
+}
+
+int calculate_octets(long int file_size){
+    if((file_size >> 24) > 0){
+        return 4;
+    }
+    else if((file_size >> 16) > 0){
+        return 3;
+    }
+    else if((file_size >> 8) > 0){
+        return 2;
+    }
+        
+    return 1; 
 }
 
 
