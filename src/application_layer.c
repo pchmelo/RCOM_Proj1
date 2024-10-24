@@ -70,6 +70,8 @@ int sendFile(const char *filename){
 
     unsigned char* control_frame_start = create_control_frame(1, filename, my_file_size, &control_frame_size);
 
+    printf("Writting\n");
+
     if(llwrite(control_frame_start, control_frame_size) == -1){
         perror("Error sending control frame");
         return -1;
@@ -194,9 +196,11 @@ void debug_control_frame_tx(const char* filename, unsigned int filename_size, in
     
     printf("Filename: ");
     for(int i = 0; i < filename_size; i++){
-        printf("%x ", filename[i]);
+        printf("%c", filename[i]);
     }
-    printf("\n Filename size: %d\n", filename_size);
+    printf("\nFilename size: %d\n", filename_size);
+    printf("Size of file: %d\n", size_of_file);
+
 }
 
 
@@ -208,9 +212,10 @@ void debug_control_frame_rx(unsigned char* filename, unsigned int filename_size,
     
     printf("Filename: ");
     for(int i = 0; i < filename_size; i++){
-        printf("%x ", filename[i]);
+        printf("%c", filename[i]);
     }
-    printf("\n Filename size: %d\n", filename_size);
+    printf("\nFilename size: %d\n", filename_size);
+    printf("Size of file: %d\n", size_of_file);
 }
 
 int calculate_octets(long int file_size){

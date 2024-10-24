@@ -170,9 +170,24 @@ int llwrite(const unsigned char *buf, int bufSize){
     int numBytes;
     unsigned char* readBuf;
 
+    if (debug){
+        printf("Frame Size: %d\n", frameSize);
+        printf("Frame Size actual:%d \n", sizeof(frame));
+    }
+
+    if(!write_aux(frame, frameSize)){
+        perror("Error writtin mensage");
+        return -1;
+    }
+    
+
     while(tries < 0 && flag){
         alarmFlag = false;
         alarm(timeout);
+
+        if(debug){
+            printf("Tries: %d\n", tries);
+        }
 
         if(!write_aux(frame, frameSize)){
             perror("Error writtin mensage");
@@ -223,6 +238,10 @@ int llread(unsigned char *packet){
     int numBytes;
     unsigned char *readBuf;
     control = NOTHING_C;
+
+    if(debug){
+        printf("Reading\n");
+    }
 
     readBuf = read_aux(&numBytes, false);
 
@@ -609,6 +628,11 @@ char calculate_BCC2(const unsigned char *buf, int bufSize){
     for(int i = 0; i < bufSize; i++){
         bcc2 ^= buf[i];
     }
+
+    if(debug){
+        printf("BCC2: %x\n", bcc2);
+    }
+
     return bcc2;
 }
 
@@ -635,6 +659,14 @@ int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char
 
     frame[numBytesMenssage + 4] = bb2;
     frame[numBytesMenssage + 5] = FLAG;
+
+    if(debug){
+        printf("Frame: ");
+        for(int i = 0; i < numBytesMenssage + 6; i++){
+            printf("%x ", frame[i]);
+        }
+        printf("\nBytes in the Message: %d\n", numBytesMenssage + 6);
+    }
 
     return numBytesMenssage + 6;
 }
