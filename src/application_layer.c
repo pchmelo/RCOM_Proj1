@@ -36,14 +36,14 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     if(connectionParameters.role == LlTx){
         // eviar o ficheiro
         if(sendFile(filename) == -1){
-            perror("Error sending file");
+            perror("Error sending file\n");
             return;
         }
     }
     else{
         // receber o ficheiro
         if(receiveFile() == -1){
-            perror("Error receiving file");
+            perror("Error receiving file\n");
             return;
         }
     }
@@ -73,7 +73,7 @@ int sendFile(const char *filename){
     printf("Writting\n");
 
     if(llwrite(control_frame_start, control_frame_size) == -1){
-        perror("Error sending control frame");
+        perror("Error sending control frame\n");
         return -1;
     }
 
@@ -91,7 +91,7 @@ int receiveFile(){
         res = llread(control_frame);
         if(res < 0){
             //lidar com os erros
-            perror("Error receiving control frame");
+            perror("Error receiving control frame\n");
             return -1;
         }
         else{

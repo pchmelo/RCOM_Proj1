@@ -151,7 +151,11 @@ int llwrite(const unsigned char *buf, int bufSize){
     unsigned char bcc2 = calculate_BCC2(buf, bufSize);
     unsigned char *newBuf;
 
-    newBuf = suffing_encode(buf, bufSize, &localBufSize);
+    unsigned char *buf_bcc2 = (unsigned char *)malloc(bufSize + 1 * sizeof(unsigned char));
+    memcpy(buf_bcc2, buf, bufSize * sizeof(unsigned char));
+    buf_bcc2[bufSize] = bcc2;
+
+    newBuf = suffing_encode(buf_bcc2, bufSize + 1, &localBufSize);
 
     if(newBuf == NULL){
         perror("Error encoding suffing");
@@ -160,7 +164,7 @@ int llwrite(const unsigned char *buf, int bufSize){
 
     unsigned char frame[localBufSize + 6];
 
-    int frameSize = mount_frame_menssage(localBufSize, newBuf, frame, bcc2);
+    int frameSize = mount_frame_menssage(localBufSize, newBuf, frame);
     free(newBuf);
 
     //colocar alarme
@@ -512,10 +516,11 @@ unsigned char* read_aux(int *readenBytes, bool alarm){
             }
         }
     }
+
     
     unsigned char *mensseBuf = (unsigned char *)malloc(pos * sizeof(unsigned char));
     memcpy(mensseBuf, buf, pos * sizeof(unsigned char));
-    readenBytes = &pos;
+    *readenBytes = pos;
 
     final_check();
 
@@ -529,6 +534,10 @@ unsigned char* read_aux(int *readenBytes, bool alarm){
 }
 
 int write_aux(unsigned char* mensage, int numBytes){
+    if(debug){
+        printf("NumBytes writting6: %d\n", numBytes);
+    }
+
     if(writeBytesSerialPort(mensage, numBytes) == -1){
         perror("Error sending SET");
         return -1;
@@ -552,6 +561,16 @@ unsigned char* suffing_encode(const unsigned char *buf, int bufSize, int *newBuf
         perror("Error allocating memory");
         return NULL;
     }
+
+    /*
+    if(debug){
+        printf("To be Encode: ");
+        for(int i = 0; i < bufSize; i++){
+            printf("0x%02X ", buf[i]);
+        }
+        printf("\n");
+    }
+    */
 
     int j = 0;
 
@@ -579,6 +598,16 @@ unsigned char* suffing_encode(const unsigned char *buf, int bufSize, int *newBuf
         return NULL;
     }
 
+    /*
+    if(debug){
+        printf("Encoded: ");
+        for(int i = 0; i < j; i++){
+            printf("0x%02X ", newBuf[i]);
+        }
+        printf("\n");
+    }
+    */
+
     return newBuf;
 }
 
@@ -595,6 +624,17 @@ unsigned char* stuffing_decode(unsigned char *buf, int bufSize, int *newBufSize)
     }
 
     int j = 0;
+    
+    /*
+    if(debug){
+        printf("Decoding: ");
+        for(int i = 4; i < bufSize -1; i++){
+            printf("0x%02X ", buf[i]);
+        }
+        printf("\n");
+    }
+    */
+    
 
     for(int i = 4; i < bufSize - 1; i++){
         if(buf[i] == 0x7d && buf[i+1] == 0x5e){
@@ -608,7 +648,6 @@ unsigned char* stuffing_decode(unsigned char *buf, int bufSize, int *newBufSize)
         } else {
             newBuf[j] = buf[i];
             j++;
-            i++;
         }
     }
 
@@ -619,18 +658,28 @@ unsigned char* stuffing_decode(unsigned char *buf, int bufSize, int *newBufSize)
         return NULL;
     }
 
+    /*
+    if(debug){
+        printf("Decoded: ");
+        for(int i = 0; i < *newBufSize; i++){
+            printf("0x%02X ", newBuf[i]);
+        }
+        printf("\n");
+    }
+    */
+    
     return newBuf;
 }
 
 //calculate BCC2 = D1 xor D2 xor ... xor Dn
-char calculate_BCC2(const unsigned char *buf, int bufSize){
-    char bcc2 = 0x00;
+unsigned char calculate_BCC2(const unsigned char *buf, int bufSize){
+    unsigned char bcc2 = 0x00;
     for(int i = 0; i < bufSize; i++){
         bcc2 ^= buf[i];
     }
 
     if(debug){
-        printf("BCC2: %x\n", bcc2);
+        printf("BCC2: 0x%02X\n", bcc2);
     }
 
     return bcc2;
@@ -638,11 +687,18 @@ char calculate_BCC2(const unsigned char *buf, int bufSize){
 
 //verify BCC2 == D1 xor D2 xor ... xor Dn
 bool verify_BCC2(unsigned char *buf, int bufSize){
-    char bcc2_calc = calculate_BCC2(buf, bufSize - 1);
+    unsigned char bcc2_calc = calculate_BCC2(buf, bufSize - 1);
+
+    if(debug){
+        printf("BCC2 Received: 0x%02X\n", buf[bufSize-1]);
+        printf("BCC2 Calculated: 0x%02X\n", bcc2_calc);
+    }
+    
+
     return buf[bufSize-1] == bcc2_calc;
 }
 
-int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char *frame, unsigned char bb2){
+int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char *frame){
     frame[0] = FLAG;
     frame[1] = A_Tx;
 
@@ -652,23 +708,22 @@ int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char
         frame[2] = C_FRAME1;
     }
 
-    frame[3] = A_Tx ^ control;
+    frame[3] = A_Tx ^ frame[2];
     for(int i = 0; i < numBytesMenssage; i++){
         frame[i+4] = buf[i];
     }
 
-    frame[numBytesMenssage + 4] = bb2;
-    frame[numBytesMenssage + 5] = FLAG;
+    frame[numBytesMenssage + 4] = FLAG;
 
     if(debug){
         printf("Frame: ");
-        for(int i = 0; i < numBytesMenssage + 6; i++){
-            printf("%x ", frame[i]);
+        for(int i = 0; i < numBytesMenssage + 5; i++){
+            printf("0x%02X ", frame[i]);
         }
-        printf("\nBytes in the Message: %d\n", numBytesMenssage + 6);
+        printf("\nBytes in the Message: %d\n", numBytesMenssage + 5);
     }
 
-    return numBytesMenssage + 6;
+    return numBytesMenssage + 5;
 }
 
 
@@ -751,7 +806,7 @@ void debug_write(unsigned char *mensage, int numBytes){
     
     printf("Sent: ");
     for(int i = 0; i < numBytes; i++){
-        printf("%x ", mensage[i]);
+        printf("0x%02X ", mensage[i]);
     }
     printf("\n");
 
@@ -767,7 +822,7 @@ void debug_read(unsigned char *mensage, int numBytes){
     
     printf("Received: ");
     for(int i = 0; i < numBytes; i++){
-        printf("%x ", mensage[i]);
+        printf("0x%02X ", mensage[i]);
     }
     printf("\n");
 }
