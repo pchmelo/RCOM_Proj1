@@ -29,7 +29,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         return;
     }
     else{
-        printf("Connection established\n");
+        printf("Connection established\n\n");
     }
 
     //transferir/receber o ficheiro
@@ -72,6 +72,12 @@ int sendFile(const char *filename){
 
     printf("Writting\n");
 
+    /*
+    if(debug_application_layer){
+        debug_print_frame(control_frame_start, control_frame_size);
+    }
+    */
+
     if(llwrite(control_frame_start, control_frame_size) == -1){
         perror("Error sending control frame\n");
         return -1;
@@ -103,13 +109,19 @@ int receiveFile(){
     unsigned long int file_size = 0;
     int filename_size = 0;
 
+    if(debug_application_layer){
+        debug_print_frame(control_frame, res);
+    }
+
     unsigned char* filename = receiveControlPacket(control_frame, &file_size, &filename_size);
 
     //FILE* my_file = fopen((char *) filename, "wb+");
     
+    /*
     if(debug_application_layer){
         debug_control_frame_rx(filename, strlen((char *) filename), file_size);
     }
+    */
 
     free(filename);
     //receber o ficheiro
@@ -194,12 +206,12 @@ void debug_control_frame_tx(const char* filename, unsigned int filename_size, in
         return;
     }
     
-    printf("Filename: ");
+    printf("\nFilename: ");
     for(int i = 0; i < filename_size; i++){
         printf("%c", filename[i]);
     }
     printf("\nFilename size: %d\n", filename_size);
-    printf("Size of file: %d\n", size_of_file);
+    printf("Size of file: %d\n\n", size_of_file);
 
 }
 
@@ -210,12 +222,12 @@ void debug_control_frame_rx(unsigned char* filename, unsigned int filename_size,
         return;
     }
     
-    printf("Filename: ");
+    printf("\nFilename: ");
     for(int i = 0; i < filename_size; i++){
         printf("%c", filename[i]);
     }
     printf("\nFilename size: %d\n", filename_size);
-    printf("Size of file: %d\n", size_of_file);
+    printf("Size of file: %d\n\n", size_of_file);
 }
 
 int calculate_octets(long int file_size){
@@ -232,5 +244,11 @@ int calculate_octets(long int file_size){
     return 1; 
 }
 
-
+void debug_print_frame(unsigned char* frame, int frame_size){
+    printf("\nFrame: ");
+    for(int i = 0; i < frame_size; i++){
+        printf("0x%02X ", frame[i]);
+    }
+    printf("\n\n");
+}
 

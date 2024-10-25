@@ -174,18 +174,13 @@ int llwrite(const unsigned char *buf, int bufSize){
     int numBytes;
     unsigned char* readBuf;
 
-    if (debug){
-        printf("Frame Size: %d\n", frameSize);
-        printf("Frame Size actual:%d \n", sizeof(frame));
-    }
-
     if(!write_aux(frame, frameSize)){
         perror("Error writtin mensage");
         return -1;
     }
     
 
-    while(tries < 0 && flag){
+    while(tries > 0 && flag){
         alarmFlag = false;
         alarm(timeout);
 
@@ -243,10 +238,6 @@ int llread(unsigned char *packet){
     unsigned char *readBuf;
     control = NOTHING_C;
 
-    if(debug){
-        printf("Reading\n");
-    }
-
     readBuf = read_aux(&numBytes, false);
 
     if (readBuf == NULL){
@@ -269,7 +260,10 @@ int llread(unsigned char *packet){
     //mensagem recebida com sucesso
     if(result == 1){
         newBuf[newBufSize - 1] = '\0';
-        packet = newBuf;
+
+        *packet = malloc(newBufSize * sizeof(unsigned char));
+        memcpy(packet, newBuf, newBufSize * sizeof(unsigned char));
+
         free(newBuf);
         return newBufSize;
     }
@@ -494,6 +488,7 @@ int c_check(unsigned char byte){
             return 0;
             break;
         }
+    
     return 1;
 }
 
@@ -534,9 +529,6 @@ unsigned char* read_aux(int *readenBytes, bool alarm){
 }
 
 int write_aux(unsigned char* mensage, int numBytes){
-    if(debug){
-        printf("NumBytes writting6: %d\n", numBytes);
-    }
 
     if(writeBytesSerialPort(mensage, numBytes) == -1){
         perror("Error sending SET");
@@ -677,10 +669,12 @@ unsigned char calculate_BCC2(const unsigned char *buf, int bufSize){
     for(int i = 0; i < bufSize; i++){
         bcc2 ^= buf[i];
     }
-
+   
+    /*
     if(debug){
         printf("BCC2: 0x%02X\n", bcc2);
     }
+    */
 
     return bcc2;
 }
@@ -689,10 +683,12 @@ unsigned char calculate_BCC2(const unsigned char *buf, int bufSize){
 bool verify_BCC2(unsigned char *buf, int bufSize){
     unsigned char bcc2_calc = calculate_BCC2(buf, bufSize - 1);
 
+    /*
     if(debug){
         printf("BCC2 Received: 0x%02X\n", buf[bufSize-1]);
         printf("BCC2 Calculated: 0x%02X\n", bcc2_calc);
     }
+    */
     
 
     return buf[bufSize-1] == bcc2_calc;
@@ -715,6 +711,7 @@ int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char
 
     frame[numBytesMenssage + 4] = FLAG;
 
+    /*
     if(debug){
         printf("Frame: ");
         for(int i = 0; i < numBytesMenssage + 5; i++){
@@ -722,6 +719,7 @@ int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char
         }
         printf("\nBytes in the Message: %d\n", numBytesMenssage + 5);
     }
+    */
 
     return numBytesMenssage + 5;
 }
@@ -755,12 +753,12 @@ int handle_llwrite_reception(){
 int handle_llread_reception(unsigned char *buf, int bufSize){
     
     //verifica se é SET ou DISC
-    if(control == C_SET){
+    if(control == SET){
         //enviar UA
         write_aux(ua_menssage_tx, 5);
         return -2;
     }
-    else if(control == C_DISC){
+    else if(control == DISC){
         //enviar DISC
         write_aux(disc_menssage, 5);
         return -3;
@@ -781,7 +779,7 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
 
     //verifica se é frame_0 ou frame_1
 
-    if(control == C_FRAME0){
+    if(control == FRAME0){
         //enviar RR1
         write_aux(rr1_menssage, 5);
         if(frame_num == 0){
@@ -789,7 +787,7 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
         } else {
             return -4;
         }
-    } else if(control == C_FRAME1){
+    } else if(control == FRAME1){
         //enviar RR0
         write_aux(rr0_menssage, 5);
         if(frame_num == 1){
@@ -802,7 +800,7 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
 }
 
 void debug_write(unsigned char *mensage, int numBytes){
-    printf("%d bytes written\n", numBytes);
+    printf("\n%d bytes written\n", numBytes);
     
     printf("Sent: ");
     for(int i = 0; i < numBytes; i++){
@@ -818,7 +816,7 @@ void debug_read(unsigned char *mensage, int numBytes){
         return;
     }
     
-    printf("%d bytes read\n", numBytes);
+    printf("\n%d bytes read\n", numBytes);
     
     printf("Received: ");
     for(int i = 0; i < numBytes; i++){
@@ -829,8 +827,49 @@ void debug_read(unsigned char *mensage, int numBytes){
 
 void final_check(){
     if(state == STOP_BIG){
-        if(control != C_FRAME1 || control != C_FRAME0){
+        if(control != FRAME1 && control != FRAME0){
             control = ERROR;
         }
+    }
+}
+
+void debug_print_c(){
+    switch(control){
+        case SET:
+            printf("SET\n");
+            break;
+        case UA:
+            printf("UA\n");
+            break;
+        case RR0:
+            printf("RR0\n");
+            break;
+        case RR1:
+            printf("RR1\n");
+            break;
+        case REJ0:
+            printf("REJ0\n");
+            break;
+        case REJ1:
+            printf("REJ1\n");
+            break;
+        case DISC:
+            printf("DISC\n");
+            break;
+        case FRAME0:
+            printf("FRAME0\n");
+            break;
+        case FRAME1:
+            printf("FRAME1\n");
+            break;
+        case ERROR:
+            printf("ERROR\n");
+            break;
+        case NOTHING_C: 
+            printf("NOTHING_C\n");
+            break;
+        default:
+            printf("Unknown\n");
+            break;
     }
 }
