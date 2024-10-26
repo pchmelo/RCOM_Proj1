@@ -174,19 +174,9 @@ int llwrite(const unsigned char *buf, int bufSize){
     int numBytes;
     unsigned char* readBuf;
 
-    if(!write_aux(frame, frameSize)){
-        perror("Error writtin mensage");
-        return -1;
-    }
-    
-
     while(tries > 0 && flag){
         alarmFlag = false;
         alarm(timeout);
-
-        if(debug){
-            printf("Tries: %d\n", tries);
-        }
 
         if(!write_aux(frame, frameSize)){
             perror("Error writtin mensage");
@@ -261,11 +251,11 @@ int llread(unsigned char *packet){
     if(result == 1){
         newBuf[newBufSize - 1] = '\0';
 
-        *packet = malloc(newBufSize * sizeof(unsigned char));
-        memcpy(packet, newBuf, newBufSize * sizeof(unsigned char));
+        *packet = (unsigned char*)malloc((newBufSize - 1) * sizeof(unsigned char));
+        memcpy(packet, newBuf, (newBufSize - 1) * sizeof(unsigned char));
 
         free(newBuf);
-        return newBufSize;
+        return newBufSize - 1;
     }
 
     free(newBuf);

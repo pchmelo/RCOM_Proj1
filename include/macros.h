@@ -30,7 +30,7 @@ typedef enum{
 
 //globla variables
 #define FLAG     0x7E
-#define A_Tx        0x03
+#define A_Tx     0x03
 #define A_Rx     0x01
 
 #define C_SET    0x03

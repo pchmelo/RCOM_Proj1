@@ -42,14 +42,14 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     }
     else{
         // receber o ficheiro
-        if(receiveFile() == -1){
+        if(receiveFile(filename) == -1){
             perror("Error receiving file\n");
             return;
         }
     }
 
     //fechar a conecção
-
+    llclose(1);
 
 }
 
@@ -70,7 +70,7 @@ int sendFile(const char *filename){
 
     unsigned char* control_frame_start = create_control_frame(1, filename, my_file_size, &control_frame_size);
 
-    printf("Writting\n");
+    printf("Writting the control word Start\n");
 
     /*
     if(debug_application_layer){
@@ -83,15 +83,42 @@ int sendFile(const char *filename){
         return -1;
     }
 
+    free(control_frame_start);
+
+    //ler conteudo do ficheiro para um buffer
+    unsigned char* file_content = (unsigned char*)malloc(sizeof(unsigned char) * my_file_size);
+    fread(file_content, sizeof(unsigned char), my_file_size, my_file);
+
+    printf("Writting the file content\n\n");
+
+    //enviar o ficheiro
+    if(sendFileContent(file_content, my_file_size) == -1){
+        perror("Error sending file content\n");
+        return -1;
+    }   
+    free(file_content);
+
+    printf("Writting the control frame end\n\n");
+
+    //enviar o control frame para terminar a conecção
+    unsigned char* control_frame_end = create_control_frame(3, filename, my_file_size, &control_frame_size);
+    if(llwrite(control_frame_end, control_frame_size) == -1){
+        perror("Error sending control frame\n");
+        return -1;
+    }
+    free(control_frame_end);
+
     return 1;
 }
 
-int receiveFile(){
+int receiveFile(const char *filename){
     //receber o control frame para começar
 
     unsigned char* control_frame = (unsigned char*)malloc(MAX_PAYLOAD_SIZE);
     bool flag = true;
     int res;
+
+    printf("Reading the control word start\n\n");
 
     while(flag){
         res = llread(control_frame);
@@ -102,6 +129,7 @@ int receiveFile(){
         }
         else{
             //receber o control frame
+
             flag = false;
         }
     }
@@ -109,33 +137,78 @@ int receiveFile(){
     unsigned long int file_size = 0;
     int filename_size = 0;
 
+    /*
     if(debug_application_layer){
         debug_print_frame(control_frame, res);
     }
-
-    unsigned char* filename = receiveControlPacket(control_frame, &file_size, &filename_size);
-
-    //FILE* my_file = fopen((char *) filename, "wb+");
-    
-    /*
-    if(debug_application_layer){
-        debug_control_frame_rx(filename, strlen((char *) filename), file_size);
-    }
     */
 
-    free(filename);
-    //receber o ficheiro
+    unsigned char* my_filename = receiveControlPacket(control_frame, &file_size, &filename_size);
 
-    //receber o cntrol frame para terminar a conecção
+    if(debug_application_layer){
+        debug_control_frame_rx(my_filename, filename_size, file_size);
+    }
+
+    FILE* my_file = fopen((char *) filename, "wb");
+    free(my_filename);
+
+    unsigned char* data_frame_packet;
+    unsigned char* data_frame;
+    flag = true;
+    int data_size = 0;
+
+    printf("Reading the file content\n\n");
+
+    while(flag){
+        data_frame_packet = (unsigned char*)malloc(MAX_PAYLOAD_SIZE);
+        res = llread(data_frame_packet);
+        if(res < 0){
+            //lidar com os erros
+            perror("Error receiving data frame\n");
+        }
+        else{
+            //receber o data frame
+
+            
+            if(debug_application_layer){
+                debug_print_frame(data_frame_packet, res);
+            }
+            
+
+            data_frame = receive_data_frame_packet(data_frame_packet, res, &data_size);
+
+            if(debug_application_layer){
+                debug_print_frame(data_frame, data_size);
+            }
+
+            if(data_size == -1){
+                printf("Reading the control word\n\n");
+                flag = false;
+            }
+            else{
+                fwrite(data_frame, sizeof(unsigned char), data_size, my_file);
+                free(data_frame_packet);
+                free(data_frame);
+            }
+        
+        }
+    }
+
+    free(data_frame_packet);
+    free(data_frame);
+
+    fclose(my_file);
+    
+    
     return 1;
 }
 
-unsigned char* create_control_frame(char c, const char* filename, long int file_size, unsigned int* final_control_size){
+unsigned char* create_control_frame(unsigned char c, const char* filename, long int file_size, unsigned int* final_control_size){
     unsigned int pos = 0;
     
-    int L1 = calculate_octets(file_size);
+    unsigned char L1 = calculate_octets(file_size);
 
-    int L2 = strlen(filename);
+    unsigned char L2 = strlen(filename);
     *final_control_size = 5 + L1 + L2; //c + T1 + L1 + file_size + T2 + L2 + file_name
 
     unsigned char *control_packet = (unsigned char*)malloc(*final_control_size);
@@ -200,6 +273,83 @@ unsigned char* receiveControlPacket(unsigned char* control_frame, unsigned long 
     return filename;
 }
 
+unsigned char calculate_octets(long int file_size) {
+    unsigned char octets = 0;
+    while (file_size > 0) {
+        file_size >>= 8; // Shift right by 8 bits (1 byte)
+        octets++;
+    }
+    return octets;
+}
+
+
+int sendFileContent(unsigned char* file_content, long int file_size){
+    long int bytes_sent = 0;
+    int sequence_number = 0;
+    unsigned char* data_frame;
+    unsigned char* data_frame_packet;
+
+    while(bytes_sent < file_size){
+        int data_frame_size = (file_size - bytes_sent) > (MAX_PAYLOAD_SIZE - 4) ? (MAX_PAYLOAD_SIZE - 4) : (file_size - bytes_sent);
+        
+        data_frame = (unsigned char*)malloc(data_frame_size);
+        memcpy(data_frame, file_content + bytes_sent, data_frame_size);
+
+        int packet_size = 0;
+        data_frame_packet = create_data_frame_packet(data_frame, data_frame_size, &packet_size, sequence_number);
+
+
+        if(llwrite(data_frame_packet, packet_size) == -1){
+            perror("Error sending file content\n");
+            return -1;
+        }
+
+        /*
+        if(debug_application_layer){
+            debug_print_frame(data_frame_packet, packet_size);
+        }
+        */
+
+        free(data_frame);
+        free(data_frame_packet);
+
+        bytes_sent += data_frame_size;
+        sequence_number ++;
+    }
+
+    return 1;
+}   
+
+unsigned char* create_data_frame_packet(unsigned char* data_frame, int data_frame_size, int* packet_size, unsigned char sequence_number){
+    *packet_size = data_frame_size + 4;
+    unsigned char* packet = (unsigned char*)malloc(*packet_size);
+
+    packet[0] = 2;
+    packet[1] = sequence_number % 100;
+    packet[2] = DataSizeL1(data_frame_size);
+    packet[3] = DataSizeL2(data_frame_size);
+
+    memcpy(packet + 4, data_frame, data_frame_size);
+    
+    return packet;
+}
+
+unsigned char* receive_data_frame_packet(unsigned char* data_frame_packet, int data_frame_packet_size, int* data_size){
+    if(data_frame_packet[0] != 2){
+        return -1;
+    }
+
+    unsigned char L1 = data_frame_packet[2];
+    unsigned char L2 = data_frame_packet[3];
+
+    int data_size = DATA_SIZE(L1, L2);
+    unsigned char* data = (unsigned char*)malloc(data_size);
+
+    memcpy(data, data_frame_packet + 4, data_size);
+
+    return data;
+}
+
 void debug_control_frame_tx(const char* filename, unsigned int filename_size, int size_of_file){
     if(filename == NULL){
         printf("Filename is NULL\n");
@@ -228,20 +378,6 @@ void debug_control_frame_rx(unsigned char* filename, unsigned int filename_size,
     }
     printf("\nFilename size: %d\n", filename_size);
     printf("Size of file: %d\n\n", size_of_file);
-}
-
-int calculate_octets(long int file_size){
-    if((file_size >> 24) > 0){
-        return 4;
-    }
-    else if((file_size >> 16) > 0){
-        return 3;
-    }
-    else if((file_size >> 8) > 0){
-        return 2;
-    }
-        
-    return 1; 
 }
 
 void debug_print_frame(unsigned char* frame, int frame_size){
