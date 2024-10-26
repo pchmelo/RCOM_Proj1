@@ -15,7 +15,7 @@ void debug_control_frame_tx(const char* filename, unsigned int filename_size, in
 unsigned char calculate_octets(long int file_size);
 int sendFileContent(unsigned char* file_content, long int file_size);
 unsigned char* create_data_frame_packet(unsigned char* data_frame, int data_frame_size, int* packet_size, unsigned char sequence_number);
-int receive_data_frame_packet(unsigned char* data_frame_packet, int data_frame_packet_size, unsigned char* data);
+unsigned char* receive_data_frame_packet(unsigned char* data_frame_packet, int data_frame_packet_size, int* data_size);
 void debug_print_frame(unsigned char* frame, int frame_size);
 
 #endif

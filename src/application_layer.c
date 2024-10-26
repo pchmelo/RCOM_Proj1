@@ -149,13 +149,14 @@ int receiveFile(const char *filename){
         debug_control_frame_rx(my_filename, filename_size, file_size);
     }
 
-    FILE* my_file = fopen((char *) filename, "wb");
+    FILE* my_file = fopen((char *) filename, "wb+");
     free(my_filename);
 
     unsigned char* data_frame_packet;
     unsigned char* data_frame;
     flag = true;
     int data_size = 0;
+    int frame_num = 0;
 
     printf("Reading the file content\n\n");
 
@@ -174,18 +175,22 @@ int receiveFile(const char *filename){
                 debug_print_frame(data_frame_packet, res);
             }
             
-
+            
             data_frame = receive_data_frame_packet(data_frame_packet, res, &data_size);
 
+            
             if(debug_application_layer){
                 debug_print_frame(data_frame, data_size);
             }
+            
 
-            if(data_size == -1){
-                printf("Reading the control word\n\n");
+            if(data_frame == NULL){
+                printf("Reading the control word end\n\n");
                 flag = false;
             }
             else{
+                printf("Frame number: %d\n", frame_num);
+                frame_num++;
                 fwrite(data_frame, sizeof(unsigned char), data_size, my_file);
                 free(data_frame_packet);
                 free(data_frame);
@@ -336,16 +341,17 @@ unsigned char* create_data_frame_packet(unsigned char* data_frame, int data_fram
 
 unsigned char* receive_data_frame_packet(unsigned char* data_frame_packet, int data_frame_packet_size, int* data_size){
     if(data_frame_packet[0] != 2){
-        return -1;
+        return NULL;
     }
 
     unsigned char L1 = data_frame_packet[2];
     unsigned char L2 = data_frame_packet[3];
 
-    int data_size = DATA_SIZE(L1, L2);
-    unsigned char* data = (unsigned char*)malloc(data_size);
+    *data_size = DATA_SIZE(L1, L2);
 
-    memcpy(data, data_frame_packet + 4, data_size);
+    unsigned char* data = (unsigned char*)malloc(*data_size);
+
+    memcpy(data, data_frame_packet + 4, *data_size);
 
     return data;
 }
@@ -381,10 +387,18 @@ void debug_control_frame_rx(unsigned char* filename, unsigned int filename_size,
 }
 
 void debug_print_frame(unsigned char* frame, int frame_size){
+    if(frame == NULL){
+        printf("Frame is NULL\n");
+        return;
+    }
+    
     printf("\nFrame: ");
     for(int i = 0; i < frame_size; i++){
         printf("0x%02X ", frame[i]);
     }
+
+    printf("\nFrame size: %d\n", frame_size);
+
     printf("\n\n");
 }
 
