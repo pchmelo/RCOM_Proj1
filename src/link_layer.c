@@ -23,7 +23,7 @@ bool debug = true;
 State state = END;
 C_TYPE control = NOTHING_C;
 bool frame_num = 0;
-LinkLayerRole my_role;
+bool my_role;
 
 int alarmCounter = 0;
 int timeout = 0;
@@ -45,7 +45,6 @@ int llopen(LinkLayer connectionParameters){
         return -1;
     }
 
-    my_role = connectionParameters.role;
     timeout = connectionParameters.timeout;
     restransmissions = connectionParameters.nRetransmissions;
 
@@ -53,6 +52,7 @@ int llopen(LinkLayer connectionParameters){
     if(connectionParameters.role == LlRx){
         // Wait for a SET then ...
         // Send UA
+        my_role = 0;
         if(!llopenRx()){
             perror("Error llopenRx");
             return -1;
@@ -61,6 +61,7 @@ int llopen(LinkLayer connectionParameters){
     } else {
         // Send SET (write)
         // Wait UA (read)
+        my_role = 1;
         if(!llopenTx()){
            perror("Error llopenTx");
            return -1; 
@@ -277,7 +278,28 @@ int llclose(int showStatistics){
     bool flag_2 = true;
 
     //enviar DISC e receber UA, caso contrário reenviar DISC
-    if(my_role == LlRx){
+
+
+    if(my_role == 0){
+        printf("My role is Rx\n");
+        while(flag){
+
+            control = NOTHING_C;
+            readBuf = read_aux(&numBytes, false);
+
+            if(control == DISC){
+                //enviar UA
+                write_aux(disc_menssage, 5);
+                flag = false;
+            }
+        }
+
+        printf("Here\n");
+
+        tries = 3;
+        flag = true;
+        timeout = 4;
+
         while(tries > 0 && flag){
             //read UA
 
@@ -303,6 +325,7 @@ int llclose(int showStatistics){
     }
     //enviar DISC, receber DISC e enviar UA
     else{
+        printf("My role is Tx\n");
         while (tries > 0 && flag){
             //eniando DISC
             write_aux(disc_menssage, 5);
@@ -347,7 +370,7 @@ int llclose(int showStatistics){
     }
 
     free(readBuf);
-    if(flag || (flag_2 && my_role == LlTx)){
+    if(flag || (flag_2 && my_role == 1)){
         return -1;
     }
 
