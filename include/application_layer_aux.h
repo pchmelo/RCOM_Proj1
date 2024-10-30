@@ -5,7 +5,6 @@
 #define DataSizeL2(n)   n & 0xFF
 #define DATA_SIZE(n,m)  ((n << 8) | m)
 
-
 int sendFile(const char *filename);
 int receiveFile(const char *filename);
 unsigned char* create_control_frame(unsigned char c, const char* filename, long int file_size, unsigned int* final_control_size);

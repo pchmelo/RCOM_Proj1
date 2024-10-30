@@ -9,15 +9,15 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/time.h>
 
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
-//Global Variables
-#define BufferSize 255
-unsigned char buf[MAX_PAYLOAD_SIZE] = {0};
+struct timeval start, end;
 
-//active debug
+//Global Variables
+
 bool debug = false;
 
 State state = END;
@@ -32,9 +32,15 @@ bool alarmFlag = false;
 
 int num_errors = 0;
 
+unsigned char buf[2*MAX_PAYLOAD_SIZE] = {0};
+
+//active debug
+
+
 void alarmHandler(int signal){
-    alarmFlag = true;
+    alarmFlag = false;
     alarmCounter++;
+    printf("Alarmcounter: %d\n", alarmCounter);
 }
 
 
@@ -42,6 +48,7 @@ void alarmHandler(int signal){
 // LLOPEN
 ////////////////////////////////////////////////
 int llopen(LinkLayer connectionParameters){
+    gettimeofday(&start, NULL);
     if (openSerialPort(connectionParameters.serialPort,
                        connectionParameters.baudRate) < 0){
         return -1;
@@ -91,11 +98,13 @@ int llopenRx(){
             free(readBuf);
             return -1;
         }
-
+        if(readBuf != NULL){
+            free(readBuf);
+        } 
     }
 
     control = NOTHING_C;
-    free(readBuf);
+    
 
     write_aux(ua_menssage_tx, 5);
     
@@ -112,25 +121,31 @@ int llopenTx(){
     int numBytes;
     int tries = restransmissions;
     control = NOTHING_C;
+    alarmCounter = 0;
 
-    while(tries > 0 && control != UA){
-        write_aux(set_menssage, 5); // Send SET
+
+    while(alarmCounter < tries && control != UA){
+        alarmFlag = true;
         alarm(timeout);
-        alarmFlag = false;
-
-        
+        write_aux(set_menssage, 5); // Send SET
         readBuf = read_aux(&numBytes, true);
 
-        if(readBuf == NULL){
-            perror("Error reading UA");
-            free(readBuf);
-            return -1;
+        if(readBuf != NULL){
+            if(control == UA){
+                break;
+            }
+            else{
+                alarmCounter = 0;
+                num_errors++;
+            }
         }
-        tries--;
+        if(readBuf != NULL){
+            free(readBuf);
+        }
     }
     
 
-    free(readBuf);
+    
 
     return control == UA;
 }
@@ -159,6 +174,7 @@ int llwrite(const unsigned char *buf, int bufSize){
     buf_bcc2[bufSize] = bcc2;
 
     newBuf = suffing_encode(buf_bcc2, bufSize + 1, &localBufSize);
+    free(buf_bcc2);
 
     if(newBuf == NULL){
         perror("Error encoding suffing");
@@ -177,11 +193,15 @@ int llwrite(const unsigned char *buf, int bufSize){
     int numBytes;
     unsigned char* readBuf;
 
-    while(tries > 0 && flag){
-        alarmFlag = false;
-        alarm(timeout);
+    
+    alarmCounter = 0;
+    
 
-        printf("Tries: %d\n", tries);
+    printf("Frame number write: %d\n", frame_num);
+
+    while(alarmCounter < tries && flag){
+        alarmFlag = true;
+        alarm(timeout);
 
         if(!write_aux(frame, frameSize)){
             perror("Error writtin mensage");
@@ -191,24 +211,22 @@ int llwrite(const unsigned char *buf, int bufSize){
         control = NOTHING_C;
         readBuf = read_aux(&numBytes, true);
 
-        if(readBuf == NULL){
-            perror("Error read_aux function");
-            free(readBuf);
-            return -1; 
-        }
+        if(readBuf != NULL){
+            int result = handle_llwrite_reception();    
 
             //mensagem recebida com sucesso
-        if(handle_llwrite_reception()){
-            flag = false;
-        }else{
-            num_errors++;
+            if(result == 1){
+                flag = false;
+            }else{
+                num_errors++;
+                alarmCounter = 0;
+            }
         }
-
-        
-        tries--;
+        if(readBuf != NULL){
+            free(readBuf);
+        }        
     }
-
-    free(readBuf);
+    
     control = NOTHING_C;
 
     if(flag){
@@ -234,41 +252,55 @@ int llread(unsigned char *packet){
     int numBytes;
     unsigned char *readBuf;
     control = NOTHING_C;
-
-    readBuf = read_aux(&numBytes, false);
-
-    if (readBuf == NULL){
-        perror("Error read_aux function");
-        free(readBuf);
-        return -1; 
-    }
-
+    bool flag = true;
     unsigned char *newBuf;
     int newBufSize;
+    int result;
 
-    //destuffing
-    newBuf = stuffing_decode(readBuf, numBytes, &newBufSize);
+    printf("Frame number read: %d\n", frame_num);
 
-    //verificar se há erros
-    int result = handle_llread_reception(newBuf, newBufSize);
-    free(readBuf);
-    control = NOTHING_C;
+    while(flag){
+        readBuf = read_aux(&numBytes, false);
 
-    //mensagem recebida com sucesso
-    if(result == 1){
-        newBuf[newBufSize - 1] = '\0';
+        if (readBuf == NULL){
+            perror("Error read_aux function");
+            free(readBuf);
+            return -1; 
+        }
 
-        *packet = (unsigned char*)malloc((newBufSize - 1) * sizeof(unsigned char));
-        memcpy(packet, newBuf, (newBufSize - 1) * sizeof(unsigned char));
 
-        free(newBuf);
-        return newBufSize - 1;
-    }
-    else{
+
+        //destuffing
+        newBuf = stuffing_decode(readBuf, numBytes, &newBufSize);
+
+        //verificar se há erros
+        result = handle_llread_reception(newBuf, newBufSize);
+        
+        if(newBuf != NULL){
+            free(readBuf);
+        }
+        control = NOTHING_C;
+
+        //mensagem recebida com sucesso
+        if(result == 1){
+            newBuf[newBufSize - 1] = '\0';
+            frame_num = !frame_num;
+
+            *packet = (unsigned char*)malloc((newBufSize - 1) * sizeof(unsigned char));
+            memcpy(packet, newBuf, (newBufSize - 1) * sizeof(unsigned char));
+
+            printf("Frame size: %d\n", newBufSize - 1);
+
+            free(newBuf);
+            return newBufSize - 1;
+        }
+
         num_errors++;
+       
     }
 
     free(newBuf);
+    printf("Error reading frame\n");
     
     //alguma inconsistência
     return result;
@@ -284,7 +316,6 @@ int llclose(int showStatistics){
     (void) signal(SIGALRM, alarmHandler);
     int tries = restransmissions;
     bool flag = true;
-    bool flag_2 = true;
 
     //enviar DISC e receber UA, caso contrário reenviar DISC
 
@@ -300,83 +331,63 @@ int llclose(int showStatistics){
                 write_aux(disc_menssage, 5);
                 flag = false;
             }
+            
+            if(readBuf != NULL){
+                free(readBuf);
+            }
         }
 
-        tries = 3;
-        flag = true;
-        timeout = 4;
 
-        while(tries > 0 && flag){
+        flag = true;
+      
+
+        while(flag){
             //read UA
 
-            alarm(timeout);
-            alarmFlag = false;
-
             control = NOTHING_C;
-            readBuf = read_aux(&numBytes, true);
-
-            if(control == DISC){
+            readBuf = read_aux(&numBytes, false);
+            
+            if(readBuf != NULL){
+                alarmCounter = 0;
+                if(control == DISC){
                 //enviar DISC
                 write_aux(disc_menssage, 5);
-            } else if(control == UA){ 
-                flag = false;
+                } else if(control == UA){ 
+                    flag = false;
+                }
             }
-            else{
-                write_aux(disc_menssage_rx, 5);
+            if(readBuf != NULL){
+                free(readBuf);
             }
-
-            
-            tries--;
         }
     }
     //enviar DISC, receber DISC e enviar UA
     else{
-        while (tries > 0 && flag){
+        while (alarmCounter < tries && flag){
             //eniando DISC
+            alarmFlag = true;
             write_aux(disc_menssage, 5);
-            
-            alarm(timeout);
-            alarmFlag = false;
             
             //receber DISC
             control = NOTHING_C;
             readBuf = read_aux(&numBytes, true);
 
-            if(control == DISC){
-                //enviar UA
-                write_aux(ua_menssage_tx, 5);
-                flag = false;
-                while(tries > 0 && flag_2){
-                    alarm(timeout);
-                    alarmFlag = false;
+            if(readBuf != NULL){
+                alarmCounter = 0;
+                if(control == DISC){
+                    //enviar UA
+                    write_aux(ua_menssage_tx, 5);
+                    flag = false;
 
-                    control = NOTHING_C;
-                    readBuf = read_aux(&numBytes, true);
-
-                    if(control == DISC){
-                        write_aux(ua_menssage_rx, 5);
-                    }
-                    else if(control == NOTHING_C){
-                        flag_2 = false;
-                        break;
-                    }
-                        
-
-                    tries--;
-                }
-
-            } 
-            
-            tries--;
+                } 
+            }
+            if(readBuf != NULL){
+                free(readBuf);
+            }
         }
         
         control = NOTHING_C;
         
-    }
-
-    free(readBuf);
-    if(flag || (flag_2 && my_role == 1)){
-        return -1;
     }
 
     if(showStatistics){
@@ -520,13 +531,19 @@ unsigned char* read_aux(int *readenBytes, bool alarm){
     unsigned char byte;
     int pos = 0;
     if(alarm){
-        while(state != STOP_BIG && state != STOP_SMALL && alarmFlag == false){
+        while(state != STOP_BIG && state != STOP_SMALL && alarmFlag){
             if(readByteSerialPort(&byte)){
                 stateMachineHandler(byte, &pos);
             }
         }
+
+        if(!alarmFlag){
+            return NULL;
+        }
+
     }
     else{
+
         while(state != STOP_BIG && state != STOP_SMALL){
             if(readByteSerialPort(&byte)){
                 stateMachineHandler(byte, &pos);
@@ -534,12 +551,14 @@ unsigned char* read_aux(int *readenBytes, bool alarm){
         }
     }
 
-    
+
     unsigned char *mensseBuf = (unsigned char *)malloc(pos * sizeof(unsigned char));
     memcpy(mensseBuf, buf, pos * sizeof(unsigned char));
     *readenBytes = pos;
 
     final_check();
+
+
 
     state = END;
 
@@ -755,14 +774,21 @@ int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char
 
 int handle_llwrite_reception(){
     //frame_0 recebido com sucesso envia o frame_1 ou o contrário
-    if((!frame_num && control == RR1) || (frame_num && control == RR0)){
+
+    debug_print_c();
+
+    if((frame_num == 0 && control == RR1) || (frame_num == 1 && control == RR0)){
         frame_num = !frame_num;
+        printf("Frame accepted\n");
         return 1;
     }
     //frame_0 foi recebido, mas com erros ou o contrário
-    else if((!frame_num && control == RR0) || (frame_num && control == RR1)){
+    else if((frame_num == 0 && control == REJ0) || (frame_num == 1 && control == REJ1)){
+        printf("Frame rejected\n");
         return 0;
     }
+
+    printf("Unknown frame\n");
 
     //lidar com os restos dos casos aqui
 
@@ -781,11 +807,13 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
     //verifica se é SET ou DISC
     if(control == SET){
         //enviar UA
+        printf("Sending UA\n");
         write_aux(ua_menssage_tx, 5);
         return -2;
     }
     else if(control == DISC){
         //enviar DISC
+        printf("Sending DISC\n");
         write_aux(disc_menssage, 5);
         return -3;
     }
@@ -793,12 +821,14 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
     //verifica o BBC2
     if(!verify_BCC2(buf, bufSize)){
         //enviar REJ
-        if(frame_num == 0){
+        if(frame_num){
             //enviar REJ0
-            write_aux(rej0_menssage, 5);
+            printf("Sending REJ1\n");
+            write_aux(rej1_menssage, 5);
         } else {
             //enviar REJ1
-            write_aux(rej1_menssage, 5);
+            printf("Sending REJ0\n");
+            write_aux(rej0_menssage, 5);
         }
         return -1;
     }
@@ -807,6 +837,7 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
 
     if(control == FRAME0){
         //enviar RR1
+        printf("Sending RR1\n");
         write_aux(rr1_menssage, 5);
         if(frame_num == 0){
             return 1;
@@ -815,6 +846,7 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
         }
     } else if(control == FRAME1){
         //enviar RR0
+        printf("Sending RR0\n");
         write_aux(rr0_menssage, 5);
         if(frame_num == 1){
             return 1;
@@ -905,6 +937,9 @@ void debug_print_c(){
 }
 
 void display_statistics(){
+    gettimeofday(&end, NULL);
+    double time_taken = (end.tv_sec - start.tv_sec) + ((end.tv_usec - start.tv_usec) / 1000000.0);
     printf("\n--------------Statistics--------------\n");
     printf("Number of Frames with errors: %d\n", num_errors);
+    printf("Time taken: %0.2f seconds\n", time_taken);
 }

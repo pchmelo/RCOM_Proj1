@@ -1,6 +1,8 @@
 #ifndef MACROS_H
 #define MACROS_H
 
+#include <stdbool.h>
+
 typedef enum {
     START,
     FLAG_RCV,
@@ -26,6 +28,7 @@ typedef enum{
     ERROR,
     NOTHING_C
 } C_TYPE;
+
 
 
 //globla variables
@@ -70,5 +73,8 @@ void debug_read(unsigned char *mensage, int numBytes);
 int c_check(unsigned char byte);
 int handle_llwrite_reception();
 int handle_llread_reception(unsigned char *buf, int bufSize);
+
+void set_frame_num(bool value);
+bool get_frame_num(void);
 
 #endif
