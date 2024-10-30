@@ -9,7 +9,7 @@
 #include <stdlib.h>
 
 LinkLayer connectionParameters;
-bool debug_application_layer = true;
+bool debug_application_layer = false;
 
 void applicationLayer(const char *serialPort, const char *role, int baudRate,
                       int nTries, int timeout, const char *filename){
@@ -36,20 +36,23 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     if(connectionParameters.role == LlTx){
         // eviar o ficheiro
         if(sendFile(filename) == -1){
-            perror("Error sending file\n");
+            perror("Error sending file applicationLayer\n");
             return;
         }
     }
     else{
         // receber o ficheiro
         if(receiveFile(filename) == -1){
-            perror("Error receiving file\n");
+            perror("Error receiving file applicationLayer\n");
             return;
         }
     }
 
     //fechar a conecção
+
     llclose(1);
+
+    printf("\nConnection closed\n");
 
 }
 
@@ -93,7 +96,7 @@ int sendFile(const char *filename){
 
     //enviar o ficheiro
     if(sendFileContent(file_content, my_file_size) == -1){
-        perror("Error sending file content\n");
+        perror("Error sending file content sendFile\n");
         return -1;
     }   
     free(file_content);
@@ -293,6 +296,7 @@ int sendFileContent(unsigned char* file_content, long int file_size){
     int sequence_number = 0;
     unsigned char* data_frame;
     unsigned char* data_frame_packet;
+    int frame_num = 1;
 
     while(bytes_sent < file_size){
         int data_frame_size = (file_size - bytes_sent) > (MAX_PAYLOAD_SIZE - 4) ? (MAX_PAYLOAD_SIZE - 4) : (file_size - bytes_sent);
@@ -303,9 +307,11 @@ int sendFileContent(unsigned char* file_content, long int file_size){
         int packet_size = 0;
         data_frame_packet = create_data_frame_packet(data_frame, data_frame_size, &packet_size, sequence_number);
 
+        printf("\n---------------------------------\n");
+        printf("Frame number: %d\n", frame_num);
 
         if(llwrite(data_frame_packet, packet_size) == -1){
-            perror("Error sending file content\n");
+            perror("Error sending file content sendFileContent\n");
             return -1;
         }
 
@@ -320,6 +326,7 @@ int sendFileContent(unsigned char* file_content, long int file_size){
 
         bytes_sent += data_frame_size;
         sequence_number ++;
+        frame_num++;
     }
 
     return 1;

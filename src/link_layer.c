@@ -18,7 +18,7 @@
 unsigned char buf[MAX_PAYLOAD_SIZE] = {0};
 
 //active debug
-bool debug = true;
+bool debug = false;
 
 State state = END;
 C_TYPE control = NOTHING_C;
@@ -29,6 +29,8 @@ int alarmCounter = 0;
 int timeout = 0;
 int restransmissions = 0;
 bool alarmFlag = false;
+
+int num_errors = 0;
 
 void alarmHandler(int signal){
     alarmFlag = true;
@@ -179,6 +181,8 @@ int llwrite(const unsigned char *buf, int bufSize){
         alarmFlag = false;
         alarm(timeout);
 
+        printf("Tries: %d\n", tries);
+
         if(!write_aux(frame, frameSize)){
             perror("Error writtin mensage");
             return -1;
@@ -196,6 +200,8 @@ int llwrite(const unsigned char *buf, int bufSize){
             //mensagem recebida com sucesso
         if(handle_llwrite_reception()){
             flag = false;
+        }else{
+            num_errors++;
         }
 
         
@@ -258,6 +264,9 @@ int llread(unsigned char *packet){
         free(newBuf);
         return newBufSize - 1;
     }
+    else{
+        num_errors++;
+    }
 
     free(newBuf);
     
@@ -281,7 +290,6 @@ int llclose(int showStatistics){
 
 
     if(my_role == 0){
-        printf("My role is Rx\n");
         while(flag){
 
             control = NOTHING_C;
@@ -293,8 +301,6 @@ int llclose(int showStatistics){
                 flag = false;
             }
         }
-
-        printf("Here\n");
 
         tries = 3;
         flag = true;
@@ -325,7 +331,6 @@ int llclose(int showStatistics){
     }
     //enviar DISC, receber DISC e enviar UA
     else{
-        printf("My role is Tx\n");
         while (tries > 0 && flag){
             //eniando DISC
             write_aux(disc_menssage, 5);
@@ -372,6 +377,10 @@ int llclose(int showStatistics){
     free(readBuf);
     if(flag || (flag_2 && my_role == 1)){
         return -1;
+    }
+
+    if(showStatistics){
+        display_statistics();
     }
 
     int clstat = closeSerialPort();
@@ -534,9 +543,11 @@ unsigned char* read_aux(int *readenBytes, bool alarm){
 
     state = END;
 
+    /*
     if(debug){
         debug_read(mensseBuf, *readenBytes);
     }
+    */
 
     return mensseBuf;
 }
@@ -548,9 +559,11 @@ int write_aux(unsigned char* mensage, int numBytes){
         return -1;
     }
 
+    /*
     if(debug){
         debug_write(mensage, numBytes);
     }
+    */
 
     return 1;
 }
@@ -812,7 +825,9 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
     return -5;
 }
 
+
 void debug_write(unsigned char *mensage, int numBytes){
+    
     printf("\n%d bytes written\n", numBytes);
     
     printf("Sent: ");
@@ -823,6 +838,7 @@ void debug_write(unsigned char *mensage, int numBytes){
 
 }
 
+/*
 void debug_read(unsigned char *mensage, int numBytes){
     if(mensage == NULL){
         printf("Error reading mensage\n");
@@ -837,6 +853,7 @@ void debug_read(unsigned char *mensage, int numBytes){
     }
     printf("\n");
 }
+*/
 
 void final_check(){
     if(state == STOP_BIG){
@@ -885,4 +902,9 @@ void debug_print_c(){
             printf("Unknown\n");
             break;
     }
+}
+
+void display_statistics(){
+    printf("\n--------------Statistics--------------\n");
+    printf("Number of Frames with errors: %d\n", num_errors);
 }
