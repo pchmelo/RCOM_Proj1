@@ -1,5 +1,5 @@
 # FEUP - First RCOM Project - 2024/2025
-> Curricular Unit: RCOM - [Rede de Computadores](https://sigarra.up.pt/feup/pt/ucurr_geral.ficha_uc_view?pv_ocorrencia_id=520321)
+> Curricular Unit: RCOM - [Rede de Computadores]([https://sigarra.up.pt/feup/pt/ucurr_geral.ficha_uc_view?pv_ocorrencia_id=520321](https://sigarra.up.pt/feup/pt/UCURR_GERAL.FICHA_UC_VIEW?pv_ocorrencia_id=333125))
 
 ## 3rd Year - 1st Semester - 1st Group Project
 
