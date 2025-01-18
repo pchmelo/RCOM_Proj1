@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 
+#include <stdbool.h>
+
 typedef enum {
     START,
     FLAG_RCV,
@@ -28,6 +30,7 @@ typedef enum{
     ERROR,
     NOTHING_C
 } C_TYPE;
+
 
 
 
