@@ -5,11 +5,11 @@
 #include <stdio.h>
 #include "link_layer.h"
 #include <string.h>
-#include <stdbool.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 LinkLayer connectionParameters;
-bool debug_application_layer = true;
+bool debug_application_layer = false;
 
 void applicationLayer(const char *serialPort, const char *role, int baudRate,
                       int nTries, int timeout, const char *filename){
@@ -36,20 +36,23 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     if(connectionParameters.role == LlTx){
         // eviar o ficheiro
         if(sendFile(filename) == -1){
-            perror("Error sending file\n");
+            perror("Error sending file applicationLayer\n");
             return;
         }
     }
     else{
         // receber o ficheiro
         if(receiveFile(filename) == -1){
-            perror("Error receiving file\n");
+            perror("Error receiving file applicationLayer\n");
             return;
         }
     }
 
     //fechar a conecção
+
     llclose(1);
+
+    printf("\nConnection closed\n");
 
 }
 
@@ -93,7 +96,7 @@ int sendFile(const char *filename){
 
     //enviar o ficheiro
     if(sendFileContent(file_content, my_file_size) == -1){
-        perror("Error sending file content\n");
+        perror("Error sending file content sendFile\n");
         return -1;
     }   
     free(file_content);
@@ -133,6 +136,8 @@ int receiveFile(const char *filename){
             flag = false;
         }
     }
+
+    free(control_frame);
     
     unsigned long int file_size = 0;
     int filename_size = 0;
@@ -156,25 +161,16 @@ int receiveFile(const char *filename){
     unsigned char* data_frame;
     flag = true;
     int data_size = 0;
-    int frame_num = 0;
+    int my_frame_num = 1;
 
     printf("Reading the file content\n\n");
 
     while(flag){
         data_frame_packet = (unsigned char*)malloc(MAX_PAYLOAD_SIZE);
         res = llread(data_frame_packet);
-        if(res < 0){
-            //lidar com os erros
-            perror("Error receiving data frame\n");
-        }
-        else{
+        if(res >= 0){
             //receber o data frame
-
-            
-            if(debug_application_layer){
-                debug_print_frame(data_frame_packet, res);
-            }
-            
+        
             
             data_frame = receive_data_frame_packet(data_frame_packet, res, &data_size);
 
@@ -189,18 +185,19 @@ int receiveFile(const char *filename){
                 flag = false;
             }
             else{
-                printf("Frame number: %d\n", frame_num);
-                frame_num++;
+                printf("Frame number: %d\n", my_frame_num);
+                printf("Frame Accepted\n\n");
+                my_frame_num++;
                 fwrite(data_frame, sizeof(unsigned char), data_size, my_file);
-                free(data_frame_packet);
-                free(data_frame);
+            
             }
+            free(data_frame_packet);
+            free(data_frame);
         
         }
     }
 
-    free(data_frame_packet);
-    free(data_frame);
+    
 
     fclose(my_file);
     
@@ -293,6 +290,7 @@ int sendFileContent(unsigned char* file_content, long int file_size){
     int sequence_number = 0;
     unsigned char* data_frame;
     unsigned char* data_frame_packet;
+    int my_frame_num = 1;
 
     while(bytes_sent < file_size){
         int data_frame_size = (file_size - bytes_sent) > (MAX_PAYLOAD_SIZE - 4) ? (MAX_PAYLOAD_SIZE - 4) : (file_size - bytes_sent);
@@ -303,23 +301,27 @@ int sendFileContent(unsigned char* file_content, long int file_size){
         int packet_size = 0;
         data_frame_packet = create_data_frame_packet(data_frame, data_frame_size, &packet_size, sequence_number);
 
+        printf("\n---------------------------------\n");
+        printf("Frame number: %d\n", my_frame_num);
+        printf("Frame size: %d\n", data_frame_size);
 
         if(llwrite(data_frame_packet, packet_size) == -1){
-            perror("Error sending file content\n");
+            perror("Error sending file content sendFileContent\n");
             return -1;
         }
 
-        /*
+        
         if(debug_application_layer){
             debug_print_frame(data_frame_packet, packet_size);
         }
-        */
+        
 
         free(data_frame);
         free(data_frame_packet);
 
         bytes_sent += data_frame_size;
         sequence_number ++;
+        my_frame_num++;
     }
 
     return 1;

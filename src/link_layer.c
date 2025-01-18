@@ -9,30 +9,40 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/time.h>
 
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
-//Global Variables
-#define BufferSize 255
-unsigned char buf[MAX_PAYLOAD_SIZE] = {0};
+struct timeval start, end;
 
-//active debug
-bool debug = true;
+//Global Variables
+
+bool debug = false;
 
 State state = END;
 C_TYPE control = NOTHING_C;
 bool frame_num = 0;
-LinkLayerRole my_role;
+bool my_role;
 
 int alarmCounter = 0;
 int timeout = 0;
 int restransmissions = 0;
 bool alarmFlag = false;
 
+int num_errors = 0;
+
+unsigned char buf[2*MAX_PAYLOAD_SIZE] = {0};
+long int bytes_sent = 0;
+long int bytes_received = 0;
+
+//active debug
+
+
 void alarmHandler(int signal){
-    alarmFlag = true;
+    alarmFlag = false;
     alarmCounter++;
+    printf("Alarmcounter: %d\n", alarmCounter);
 }
 
 
@@ -40,12 +50,12 @@ void alarmHandler(int signal){
 // LLOPEN
 ////////////////////////////////////////////////
 int llopen(LinkLayer connectionParameters){
+    gettimeofday(&start, NULL);
     if (openSerialPort(connectionParameters.serialPort,
                        connectionParameters.baudRate) < 0){
         return -1;
     }
 
-    my_role = connectionParameters.role;
     timeout = connectionParameters.timeout;
     restransmissions = connectionParameters.nRetransmissions;
 
@@ -53,6 +63,7 @@ int llopen(LinkLayer connectionParameters){
     if(connectionParameters.role == LlRx){
         // Wait for a SET then ...
         // Send UA
+        my_role = 0;
         if(!llopenRx()){
             perror("Error llopenRx");
             return -1;
@@ -61,6 +72,7 @@ int llopen(LinkLayer connectionParameters){
     } else {
         // Send SET (write)
         // Wait UA (read)
+        my_role = 1;
         if(!llopenTx()){
            perror("Error llopenTx");
            return -1; 
@@ -88,11 +100,13 @@ int llopenRx(){
             free(readBuf);
             return -1;
         }
-
+        if(readBuf != NULL){
+            free(readBuf);
+        } 
     }
 
     control = NOTHING_C;
-    free(readBuf);
+    
 
     write_aux(ua_menssage_tx, 5);
     
@@ -109,25 +123,31 @@ int llopenTx(){
     int numBytes;
     int tries = restransmissions;
     control = NOTHING_C;
+    alarmCounter = 0;
 
-    while(tries > 0 && control != UA){
-        write_aux(set_menssage, 5); // Send SET
+
+    while(alarmCounter < tries && control != UA){
+        alarmFlag = true;
         alarm(timeout);
-        alarmFlag = false;
-
-        
+        write_aux(set_menssage, 5); // Send SET
         readBuf = read_aux(&numBytes, true);
 
-        if(readBuf == NULL){
-            perror("Error reading UA");
-            free(readBuf);
-            return -1;
+        if(readBuf != NULL){
+            if(control == UA){
+                break;
+            }
+            else{
+                alarmCounter = 0;
+                num_errors++;
+            }
         }
-        tries--;
+        if(readBuf != NULL){
+            free(readBuf);
+        }
     }
     
 
-    free(readBuf);
+    
 
     return control == UA;
 }
@@ -156,6 +176,7 @@ int llwrite(const unsigned char *buf, int bufSize){
     buf_bcc2[bufSize] = bcc2;
 
     newBuf = suffing_encode(buf_bcc2, bufSize + 1, &localBufSize);
+    free(buf_bcc2);
 
     if(newBuf == NULL){
         perror("Error encoding suffing");
@@ -174,8 +195,14 @@ int llwrite(const unsigned char *buf, int bufSize){
     int numBytes;
     unsigned char* readBuf;
 
-    while(tries > 0 && flag){
-        alarmFlag = false;
+    
+    alarmCounter = 0;
+    bytes_sent += frameSize;
+
+    printf("Frame number write: %d\n", frame_num);
+
+    while(alarmCounter < tries && flag){
+        alarmFlag = true;
         alarm(timeout);
 
         if(!write_aux(frame, frameSize)){
@@ -186,22 +213,22 @@ int llwrite(const unsigned char *buf, int bufSize){
         control = NOTHING_C;
         readBuf = read_aux(&numBytes, true);
 
-        if(readBuf == NULL){
-            perror("Error read_aux function");
-            free(readBuf);
-            return -1; 
-        }
+        if(readBuf != NULL){
+            int result = handle_llwrite_reception();    
 
             //mensagem recebida com sucesso
-        if(handle_llwrite_reception()){
-            flag = false;
+            if(result == 1){
+                flag = false;
+            }else{
+                num_errors++;
+                alarmCounter = 0;
+            }
         }
-
-        
-        tries--;
+        if(readBuf != NULL){
+            free(readBuf);
+        }        
     }
-
-    free(readBuf);
+    
     control = NOTHING_C;
 
     if(flag){
@@ -227,38 +254,55 @@ int llread(unsigned char *packet){
     int numBytes;
     unsigned char *readBuf;
     control = NOTHING_C;
-
-    readBuf = read_aux(&numBytes, false);
-
-    if (readBuf == NULL){
-        perror("Error read_aux function");
-        free(readBuf);
-        return -1; 
-    }
-
+    bool flag = true;
     unsigned char *newBuf;
     int newBufSize;
+    int result;
 
-    //destuffing
-    newBuf = stuffing_decode(readBuf, numBytes, &newBufSize);
+    while(flag){
+        readBuf = read_aux(&numBytes, false);
 
-    //verificar se há erros
-    int result = handle_llread_reception(newBuf, newBufSize);
-    free(readBuf);
-    control = NOTHING_C;
+        if (readBuf == NULL){
+            perror("Error read_aux function");
+            free(readBuf);
+            return -1; 
+        }
+        
+        bytes_sent += newBufSize;
 
-    //mensagem recebida com sucesso
-    if(result == 1){
-        newBuf[newBufSize - 1] = '\0';
+        //destuffing
+        newBuf = stuffing_decode(readBuf, numBytes, &newBufSize);
 
-        *packet = (unsigned char*)malloc((newBufSize - 1) * sizeof(unsigned char));
-        memcpy(packet, newBuf, (newBufSize - 1) * sizeof(unsigned char));
+        //verificar se há erros
+        result = handle_llread_reception(newBuf, newBufSize);
+        
+        if(newBuf != NULL){
+            free(readBuf);
+        }
+        control = NOTHING_C;
 
-        free(newBuf);
-        return newBufSize - 1;
+        //mensagem recebida com sucesso
+        if(result == 1){
+            newBuf[newBufSize - 1] = '\0';
+            frame_num = !frame_num;
+
+            *packet = (unsigned char*)malloc((newBufSize - 1) * sizeof(unsigned char));
+            memcpy(packet, newBuf, (newBufSize - 1) * sizeof(unsigned char));
+            free(newBuf);
+            bytes_received += numBytes;
+            
+
+            return newBufSize - 1;
+        }
+
+        
+
+        num_errors++;
+       
     }
 
     free(newBuf);
+    printf("Error reading frame\n");
     
     //alguma inconsistência
     return result;
@@ -274,81 +318,82 @@ int llclose(int showStatistics){
     (void) signal(SIGALRM, alarmHandler);
     int tries = restransmissions;
     bool flag = true;
-    bool flag_2 = true;
 
     //enviar DISC e receber UA, caso contrário reenviar DISC
-    if(my_role == LlRx){
-        while(tries > 0 && flag){
-            //read UA
 
-            alarm(timeout);
-            alarmFlag = false;
+
+    if(my_role == 0){
+        while(flag){
 
             control = NOTHING_C;
-            readBuf = read_aux(&numBytes, true);
+            readBuf = read_aux(&numBytes, false);
 
             if(control == DISC){
-                //enviar DISC
+                //enviar UA
                 write_aux(disc_menssage, 5);
-            } else if(control == UA){ 
                 flag = false;
             }
-            else{
-                write_aux(disc_menssage_rx, 5);
-            }
-
             
-            tries--;
+            if(readBuf != NULL){
+                free(readBuf);
+            }
+        }
+
+
+        flag = true;
+      
+
+        while(flag){
+            //read UA
+
+            control = NOTHING_C;
+            readBuf = read_aux(&numBytes, false);
+            
+            if(readBuf != NULL){
+                alarmCounter = 0;
+                if(control == DISC){
+                //enviar DISC
+                write_aux(disc_menssage, 5);
+                } else if(control == UA){ 
+                    flag = false;
+                }
+            }
+            if(readBuf != NULL){
+                free(readBuf);
+            }
         }
     }
     //enviar DISC, receber DISC e enviar UA
     else{
-        while (tries > 0 && flag){
+        while (alarmCounter < tries && flag){
             //eniando DISC
+            alarmFlag = true;
             write_aux(disc_menssage, 5);
-            
-            alarm(timeout);
-            alarmFlag = false;
             
             //receber DISC
             control = NOTHING_C;
             readBuf = read_aux(&numBytes, true);
 
-            if(control == DISC){
-                //enviar UA
-                write_aux(ua_menssage_tx, 5);
-                flag = false;
-                while(tries > 0 && flag_2){
-                    alarm(timeout);
-                    alarmFlag = false;
+            if(readBuf != NULL){
+                alarmCounter = 0;
+                if(control == DISC){
+                    //enviar UA
+                    write_aux(ua_menssage_tx, 5);
+                    flag = false;
 
-                    control = NOTHING_C;
-                    readBuf = read_aux(&numBytes, true);
-
-                    if(control == DISC){
-                        write_aux(ua_menssage_rx, 5);
-                    }
-                    else if(control == NOTHING_C){
-                        flag_2 = false;
-                        break;
-                    }
-                        
-
-                    tries--;
-                }
-
-            } 
-            
-            tries--;
+                } 
+            }
+            if(readBuf != NULL){
+                free(readBuf);
+            }
         }
         
         control = NOTHING_C;
         
     }
 
-    free(readBuf);
-    if(flag || (flag_2 && my_role == LlTx)){
-        return -1;
+    if(showStatistics){
+        display_statistics();
     }
 
     int clstat = closeSerialPort();
@@ -488,13 +533,19 @@ unsigned char* read_aux(int *readenBytes, bool alarm){
     unsigned char byte;
     int pos = 0;
     if(alarm){
-        while(state != STOP_BIG && state != STOP_SMALL && alarmFlag == false){
+        while(state != STOP_BIG && state != STOP_SMALL && alarmFlag){
             if(readByteSerialPort(&byte)){
                 stateMachineHandler(byte, &pos);
             }
         }
+
+        if(!alarmFlag){
+            return NULL;
+        }
+
     }
     else{
+
         while(state != STOP_BIG && state != STOP_SMALL){
             if(readByteSerialPort(&byte)){
                 stateMachineHandler(byte, &pos);
@@ -502,18 +553,22 @@ unsigned char* read_aux(int *readenBytes, bool alarm){
         }
     }
 
-    
+
     unsigned char *mensseBuf = (unsigned char *)malloc(pos * sizeof(unsigned char));
     memcpy(mensseBuf, buf, pos * sizeof(unsigned char));
     *readenBytes = pos;
 
     final_check();
 
+
+
     state = END;
 
+    /*
     if(debug){
         debug_read(mensseBuf, *readenBytes);
     }
+    */
 
     return mensseBuf;
 }
@@ -523,10 +578,6 @@ int write_aux(unsigned char* mensage, int numBytes){
     if(writeBytesSerialPort(mensage, numBytes) == -1){
         perror("Error sending SET");
         return -1;
-    }
-
-    if(debug){
-        debug_write(mensage, numBytes);
     }
 
     return 1;
@@ -543,16 +594,6 @@ unsigned char* suffing_encode(const unsigned char *buf, int bufSize, int *newBuf
         perror("Error allocating memory");
         return NULL;
     }
-
-    /*
-    if(debug){
-        printf("To be Encode: ");
-        for(int i = 0; i < bufSize; i++){
-            printf("0x%02X ", buf[i]);
-        }
-        printf("\n");
-    }
-    */
 
     int j = 0;
 
@@ -580,16 +621,6 @@ unsigned char* suffing_encode(const unsigned char *buf, int bufSize, int *newBuf
         return NULL;
     }
 
-    /*
-    if(debug){
-        printf("Encoded: ");
-        for(int i = 0; i < j; i++){
-            printf("0x%02X ", newBuf[i]);
-        }
-        printf("\n");
-    }
-    */
-
     return newBuf;
 }
 
@@ -602,21 +633,10 @@ unsigned char* stuffing_decode(unsigned char *buf, int bufSize, int *newBufSize)
 
     if(newBuf == NULL){
         perror("Error allocating memory");
-        return NULL;
+        return NULL;bool get_frame_num(void);
     }
 
     int j = 0;
-    
-    /*
-    if(debug){
-        printf("Decoding: ");
-        for(int i = 4; i < bufSize -1; i++){
-            printf("0x%02X ", buf[i]);
-        }
-        printf("\n");
-    }
-    */
-    
 
     for(int i = 4; i < bufSize - 1; i++){
         if(buf[i] == 0x7d && buf[i+1] == 0x5e){
@@ -639,32 +659,16 @@ unsigned char* stuffing_decode(unsigned char *buf, int bufSize, int *newBufSize)
         perror("Error reallocating memory");
         return NULL;
     }
-
-    /*
-    if(debug){
-        printf("Decoded: ");
-        for(int i = 0; i < *newBufSize; i++){
-            printf("0x%02X ", newBuf[i]);
-        }
-        printf("\n");
-    }
-    */
     
     return newBuf;
 }
 
-//calculate BCC2 = D1 xor D2 xor ... xor Dn
+//calculate BCC2 = D1 xor D2 xor ...bool get_frame_num(void); xor Dn
 unsigned char calculate_BCC2(const unsigned char *buf, int bufSize){
     unsigned char bcc2 = 0x00;
     for(int i = 0; i < bufSize; i++){
         bcc2 ^= buf[i];
     }
-   
-    /*
-    if(debug){
-        printf("BCC2: 0x%02X\n", bcc2);
-    }
-    */
 
     return bcc2;
 }
@@ -672,15 +676,6 @@ unsigned char calculate_BCC2(const unsigned char *buf, int bufSize){
 //verify BCC2 == D1 xor D2 xor ... xor Dn
 bool verify_BCC2(unsigned char *buf, int bufSize){
     unsigned char bcc2_calc = calculate_BCC2(buf, bufSize - 1);
-
-    /*
-    if(debug){
-        printf("BCC2 Received: 0x%02X\n", buf[bufSize-1]);
-        printf("BCC2 Calculated: 0x%02X\n", bcc2_calc);
-    }
-    */
-    
-
     return buf[bufSize-1] == bcc2_calc;
 }
 
@@ -700,17 +695,6 @@ int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char
     }
 
     frame[numBytesMenssage + 4] = FLAG;
-
-    /*
-    if(debug){
-        printf("Frame: ");
-        for(int i = 0; i < numBytesMenssage + 5; i++){
-            printf("0x%02X ", frame[i]);
-        }
-        printf("\nBytes in the Message: %d\n", numBytesMenssage + 5);
-    }
-    */
-
     return numBytesMenssage + 5;
 }
 
@@ -719,16 +703,15 @@ int mount_frame_menssage(int numBytesMenssage, unsigned char *buf, unsigned char
 
 int handle_llwrite_reception(){
     //frame_0 recebido com sucesso envia o frame_1 ou o contrário
-    if((!frame_num && control == RR1) || (frame_num && control == RR0)){
+
+    if((frame_num == 0 && control == RR1) || (frame_num == 1 && control == RR0)){
         frame_num = !frame_num;
         return 1;
     }
     //frame_0 foi recebido, mas com erros ou o contrário
-    else if((!frame_num && control == RR0) || (frame_num && control == RR1)){
+    else if((frame_num == 0 && control == REJ0) || (frame_num == 1 && control == REJ1)){
         return 0;
     }
-
-    //lidar com os restos dos casos aqui
 
     return 0;
 }
@@ -757,12 +740,12 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
     //verifica o BBC2
     if(!verify_BCC2(buf, bufSize)){
         //enviar REJ
-        if(frame_num == 0){
+        if(frame_num){
             //enviar REJ0
-            write_aux(rej0_menssage, 5);
+            write_aux(rej1_menssage, 5);
         } else {
             //enviar REJ1
-            write_aux(rej1_menssage, 5);
+            write_aux(rej0_menssage, 5);
         }
         return -1;
     }
@@ -789,7 +772,9 @@ int handle_llread_reception(unsigned char *buf, int bufSize){
     return -5;
 }
 
+
 void debug_write(unsigned char *mensage, int numBytes){
+    
     printf("\n%d bytes written\n", numBytes);
     
     printf("Sent: ");
@@ -800,21 +785,6 @@ void debug_write(unsigned char *mensage, int numBytes){
 
 }
 
-void debug_read(unsigned char *mensage, int numBytes){
-    if(mensage == NULL){
-        printf("Error reading mensage\n");
-        return;
-    }
-    
-    printf("\n%d bytes read\n", numBytes);
-    
-    printf("Received: ");
-    for(int i = 0; i < numBytes; i++){
-        printf("0x%02X ", mensage[i]);
-    }
-    printf("\n");
-}
-
 void final_check(){
     if(state == STOP_BIG){
         if(control != FRAME1 && control != FRAME0){
@@ -823,43 +793,20 @@ void final_check(){
     }
 }
 
-void debug_print_c(){
-    switch(control){
-        case SET:
-            printf("SET\n");
-            break;
-        case UA:
-            printf("UA\n");
-            break;
-        case RR0:
-            printf("RR0\n");
-            break;
-        case RR1:
-            printf("RR1\n");
-            break;
-        case REJ0:
-            printf("REJ0\n");
-            break;
-        case REJ1:
-            printf("REJ1\n");
-            break;
-        case DISC:
-            printf("DISC\n");
-            break;
-        case FRAME0:
-            printf("FRAME0\n");
-            break;
-        case FRAME1:
-            printf("FRAME1\n");
-            break;
-        case ERROR:
-            printf("ERROR\n");
-            break;
-        case NOTHING_C: 
-            printf("NOTHING_C\n");
-            break;
-        default:
-            printf("Unknown\n");
-            break;
+
+void display_statistics(){
+    gettimeofday(&end, NULL);
+    double time_taken = (end.tv_sec - start.tv_sec) + ((end.tv_usec - start.tv_usec) / 1000000.0);
+    printf("\n--------------Statistics--------------\n");
+    printf("Number of Frames with errors: %d\n", num_errors);
+    printf("Time taken: %0.2f seconds\n", time_taken);
+    
+    if(my_role == 0){
+        printf("Number of bytes received: %ld\n", bytes_received);
+        printf("Total file size: %ld\n", bytes_sent);
+    } else {
+        printf("Number of bytes sent: %ld\n", bytes_sent);
     }
+   
+
 }
